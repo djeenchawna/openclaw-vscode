@@ -10,6 +10,7 @@
   "config.aiOutputLanguage.enum.en": "English",
   "config.aiOutputLanguage.enum.ja": "日本語 (Japanese)",
   "config.aiOutputLanguage.enum.ko": "한국어 (Korean)",
+  "config.aiOutputLanguage.enum.th": "ภาษาไทย (Thai)",
   "config.autoRefreshInterval.description": "Auto-refresh interval in milliseconds (0 to disable)",
   "config.autoRefreshInterval.markdownDescription": "Auto-refresh session history interval (milliseconds).\\n\\n- `0`: Disable auto-refresh\\n- `5000`: Refresh every 5 seconds\\n- `10000`: Refresh every 10 seconds (default)\\n- `30000`: Refresh every 30 seconds",
   "config.enableCliFallback.description": "Enable CLI command fallback when WebSocket fails (for debugging). When disabled, only WebSocket mode is used.",

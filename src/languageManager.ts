@@ -48,7 +48,8 @@ export class LanguageManager {
             'en': 'en',
             'en-us': 'en',
             'ja': 'ja',
-            'ko': 'ko'
+            'ko': 'ko',
+            'th': 'th'
         };
 
         return localeMap[normalized] || 'en';
@@ -93,7 +94,8 @@ export class LanguageManager {
             'zh-TW': 'Chinese (Traditional)',
             'en': 'English',
             'ja': 'Japanese',
-            'ko': 'Korean'
+            'ko': 'Korean',
+            'th': 'Thai'
         };
 
         // 英文是默认，不需要额外指令
@@ -116,7 +118,8 @@ export class LanguageManager {
             'zh-TW': '繁體中文',
             'en': 'English',
             'ja': '日本語',
-            'ko': '한국어'
+            'ko': '한국어',
+            'th': 'ภาษาไทย'
         };
 
         return displayNames[lang] || lang;

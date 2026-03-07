@@ -143,14 +143,16 @@
             "zh-CN",
             "en",
             "ja",
-            "ko"
+            "ko",
+            "th"
           ],
           "enumDescriptions": [
             "%config.aiOutputLanguage.enum.auto%",
             "%config.aiOutputLanguage.enum.zh-CN%",
             "%config.aiOutputLanguage.enum.en%",
             "%config.aiOutputLanguage.enum.ja%",
-            "%config.aiOutputLanguage.enum.ko%"
+            "%config.aiOutputLanguage.enum.ko%",
+            "%config.aiOutputLanguage.enum.th%"
           ],
           "default": "auto",
           "description": "%config.aiOutputLanguage.description%"
@@ -194,9 +196,9 @@
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
     "@types/ws": "^8.18.1",
-    "@vscode/vsce": "^2.22.0",
+    "@vscode/vsce": "^2.32.0",
     "canvas": "^3.2.1",
-    "typescript": "^5.3.0"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "js-yaml": "^4.1.1",
