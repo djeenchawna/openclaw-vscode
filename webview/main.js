@@ -190,11 +190,20 @@
     const statusPopupDesc = document.getElementById('statusPopupDesc');
     const statusPopupActions = document.getElementById('statusPopupActions');
 
-    // Escape HTML for XSS prevention
+    // Escape HTML for XSS prevention (text nodes)
     function escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // Escape for use inside HTML attribute values (also escapes double quotes)
+    function escapeAttr(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 
     // Simple Markdown renderer
@@ -332,7 +341,7 @@
         const meta = getToolMeta(name);
         const detail = getToolDetail(name, args);
         const hasArgs = args && Object.keys(args).length > 0;
-        const argsJson = hasArgs ? escapeHtml(JSON.stringify(args)) : '';
+        const argsJson = hasArgs ? escapeAttr(JSON.stringify(args)) : '';
         return `<div class="tool-card">
             <div class="tool-card-header">
                 <span class="tool-card-icon">${meta.icon}</span>
@@ -340,7 +349,7 @@
                 <span class="tool-card-check">✓</span>
             </div>
             ${detail ? `<div class="tool-card-detail">${escapeHtml(detail)}</div>` : ''}
-            ${hasArgs ? `<button class="tool-card-expand" data-name="${escapeHtml(meta.label)}" data-args="${argsJson}">{ }</button>` : ''}
+            ${hasArgs ? `<button class="tool-card-expand" data-name="${escapeAttr(meta.label)}" data-args="${argsJson}">{...}</button>` : ''}
         </div>`;
     }
 
