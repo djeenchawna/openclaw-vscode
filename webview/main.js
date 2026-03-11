@@ -331,6 +331,8 @@
     function renderToolCard(name, args) {
         const meta = getToolMeta(name);
         const detail = getToolDetail(name, args);
+        const hasArgs = args && Object.keys(args).length > 0;
+        const argsJson = hasArgs ? escapeHtml(JSON.stringify(args)) : '';
         return `<div class="tool-card">
             <div class="tool-card-header">
                 <span class="tool-card-icon">${meta.icon}</span>
@@ -338,6 +340,7 @@
                 <span class="tool-card-check">✓</span>
             </div>
             ${detail ? `<div class="tool-card-detail">${escapeHtml(detail)}</div>` : ''}
+            ${hasArgs ? `<button class="tool-card-expand" data-name="${escapeHtml(meta.label)}" data-args="${argsJson}">{ }</button>` : ''}
         </div>`;
     }
 
@@ -694,6 +697,28 @@
         if (e.target === statusPopupOverlay) {
             hideStatusPopup();
         }
+    });
+
+    // ========== Tool detail modal ==========
+    const toolDetailOverlay = document.getElementById('toolDetailOverlay');
+    const toolDetailTitle   = document.getElementById('toolDetailTitle');
+    const toolDetailBody    = document.getElementById('toolDetailBody');
+    const toolDetailClose   = document.getElementById('toolDetailClose');
+
+    messages.addEventListener('click', (e) => {
+        const btn = e.target.closest('.tool-card-expand');
+        if (!btn) return;
+        const name = btn.dataset.name || 'Tool';
+        let argsObj;
+        try { argsObj = JSON.parse(btn.dataset.args || '{}'); } catch (err) { argsObj = {}; }
+        toolDetailTitle.textContent = name;
+        toolDetailBody.textContent = JSON.stringify(argsObj, null, 2);
+        toolDetailOverlay.classList.add('show');
+    });
+
+    toolDetailClose.addEventListener('click', () => toolDetailOverlay.classList.remove('show'));
+    toolDetailOverlay.addEventListener('click', (e) => {
+        if (e.target === toolDetailOverlay) toolDetailOverlay.classList.remove('show');
     });
 
     statusPopupActions.addEventListener('click', (e) => {
