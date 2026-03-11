@@ -1110,7 +1110,7 @@ Try:
 
         for (const img of images) {
             if (img.path) {
-                fullMessage += `\n\n[附件图片: ${img.path}]`;
+                fullMessage += `\n\n[Image: ${img.path}]`;
             }
         }
 
