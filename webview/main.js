@@ -386,8 +386,8 @@
         for (const tc of toolCalls) {
             const card = document.createElement('div');
             card.innerHTML = renderToolCard(tc.name, tc.args);
-            // 新卡片追加到末尾（按时间顺序）
-            row.appendChild(card.firstElementChild);
+            // 新卡片添加到开头（最新的在最前）
+            row.prepend(card.firstElementChild);
         }
 
         // 只有之前就在底部时才自动滚动（避免用户正在看历史时被拉走）
