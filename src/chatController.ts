@@ -435,8 +435,8 @@ export class ChatController {
                 const customPrompt = vscode.workspace.getConfiguration('openclaw').get<string>('planModePrompt', '').trim();
                 const marker = isZh ? '---- 计划模式 ----' : '---- Plan Mode ----';
                 const body = customPrompt || (isZh
-                    ? '⚠️ 计划模式\n允许: 只读工具(读文件/搜索/列目录)\n禁止: 写入/修改/删除/执行\n输出: 步骤+影响的完整计划\n用户说"执行"后才可调用写入工具'
-                    : '⚠️ Plan Mode\nAllowed: read-only tools (read/search/list)\nForbidden: write/modify/delete/execute\nOutput: complete plan with steps + impact\nAwait user "execute" before write tools');
+                    ? '⚠️ 计划模式\nዝፍቀድ: ምንባብ፣ ምድላይ፣ ምዝርዛር\nክልኩል: ምጽሓፍ፣ ምቕያር፣ ምድምሳስ፣ ምፍጻም\nስጉምትታት: 1) ነቲ ዕማም ምርዳእ 2) ኣብ ንኣሽቱ ንኡሳን ዕማማት ምብታን 3) ንነፍሲ ​​ወከፍ ስጉምቲ ዕላማን ጽልዋን ግለጽ\nውጽኢት: ደረጃ ብደረጃ ውጥን\nቅድሚ ዝኾነ ናይ ጽሕፈት ስጉምቲ ተጠቃሚ "ክፍጽም" ተጸበ'
+                    : '⚠️ PLAN MODE\nAllowed: read, search, list\nForbidden: write, modify, delete, execute\nSteps: 1) Understand the task 2) Break into small sub-tasks 3) Describe goal and impact for each step\nOutput: step-by-step plan\nWait for user "execute" before any write action');
                 messageToSend += `\n\n${marker}\n${body}\n${marker}`;
             }
         }
