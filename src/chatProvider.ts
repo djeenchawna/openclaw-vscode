@@ -107,8 +107,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this._controller.sendFile();
     }
 
-    public async addAgentToGroup(agentId: string): Promise<void> {
-        await this._controller.addAgentToGroup(agentId);
+    public async addAgentToGroup(agentId: string, model?: string): Promise<void> {
+        await this._controller.addAgentToGroup(agentId, model);
     }
 
     public removeAgentFromGroup(agentId: string): void {

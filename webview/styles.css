@@ -2005,6 +2005,31 @@ body {
     text-transform: uppercase;
 }
 
+/* Chain-queued agent indicator (waiting for its turn) */
+.agent-queued {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 14px;
+    font-size: 11px;
+    opacity: 0.45;
+}
+
+.agent-queued-avatar {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 700;
+    color: white;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    border: 1px dashed rgba(255,255,255,0.3);
+}
+
 /* @mention badge in user message */
 .mention-badge {
     display: inline-block;

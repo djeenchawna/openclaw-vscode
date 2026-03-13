@@ -186,7 +186,7 @@
         },
         "openclaw.autoRefreshInterval": {
           "type": "number",
-          "default": 2000,
+          "default": 1000,
           "minimum": 0,
           "description": "%config.autoRefreshInterval.description%",
           "markdownDescription": "%config.autoRefreshInterval.markdownDescription%"
@@ -198,7 +198,7 @@
         },
         "openclaw.planMode": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Enable Plan Mode by default"
         },
         "openclaw.gatewayToken": {

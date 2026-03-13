@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import { GatewayClient } from './gateway';
 import { buildSessionKey } from './agentConfig';
 import { parseMentions } from './mentionParser';
+import { isSentinelMessage } from './messageBuilder';
 
 // ─── Color palette ────────────────────────────────────────────────────────────
 export const AGENT_COLORS = [
@@ -59,6 +60,7 @@ export interface GroupMessage {
 export type GroupMessageCallback = (msg: GroupMessage) => void;
 export type GroupStateCallback = (agents: AgentMember[]) => void;
 export type GroupWarningCallback = (reason: 'loop_limit') => void;
+export type GroupChainProgressCallback = (progress: { current: string; queued: string[] }) => void;
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 export class GroupChatManager {
@@ -99,6 +101,7 @@ export class GroupChatManager {
     private _messageCallbacks: GroupMessageCallback[] = [];
     private _stateCallbacks: GroupStateCallback[] = [];
     private _warningCallbacks: GroupWarningCallback[] = [];
+    private _chainProgressCallbacks: GroupChainProgressCallback[] = [];
 
     // Gateway chat event handler
     private _chatEventHandler: ((payload: any) => void) | null = null;
@@ -139,6 +142,8 @@ export class GroupChatManager {
             const eventRunId: string = payload.runId || '';
             const state: string = payload.state || '';
 
+            console.log(`[GroupChat] Chat event: sessionKey=${eventSessionKey} runId=${eventRunId} state=${state}`);
+
             // Find which agent this event belongs to — exact match only.
             // Do NOT use a broad startsWith fallback: it would match unrelated sessions
             // (e.g. the main chat session "agent:main:vscode-main-*" would be caught
@@ -147,8 +152,17 @@ export class GroupChatManager {
             for (const agent of this._agents.values()) {
                 if (eventSessionKey === agent.sessionKey) {
                     matchedAgent = agent;
+                    console.log(`[GroupChat] Matched agent: ${agent.agentId} (${agent.name})`);
                     break;
                 }
+            }
+
+            // Debug: log pending runIds
+            console.log(`[GroupChat] Pending runIds:`, Array.from(this._pendingRunIds.entries()));
+
+            // DEBUG: Log ALL runId deletions to track where they disappear
+            if (eventRunId && this._pendingRunIds.has(eventRunId)) {
+                console.log(`[GroupChat] runId ${eventRunId} FOUND in pending, will process event`);
             }
 
             // Strict runId guard: if the event carries a runId that we never issued
@@ -156,11 +170,13 @@ export class GroupChatManager {
             // skip it entirely. This prevents system-prompt NO_REPLY responses from
             // being treated as user-triggered responses.
             if (matchedAgent && eventRunId && !this._pendingRunIds.has(eventRunId)) {
-                // Unknown runId → not a user-triggered response; ignore silently.
-                return;
+                // DEBUG: ยังคง allow เพื่อดูว่า message มาจริงหรือไม่
+                console.log(`[GroupChat] WARNING: runId ${eventRunId} not in pending, but allowing anyway for debug`);
+                // return; // Commented out for debugging - remove after confirmed working
             }
 
             if (!matchedAgent) {
+                console.log(`[GroupChat] No matched agent for sessionKey=${eventSessionKey}`);
                 return;
             }
 
@@ -365,8 +381,10 @@ export class GroupChatManager {
         this._chainContext = [];
         this._chainQueue = targetAgents.slice(1);
 
-        // Build message for first agent
-        let firstMessage = content;
+        // Build message for first agent (with group context from previous messages)
+        const firstAgent = targetAgents[0];
+        const groupCtx = this._buildGroupContext(firstAgent.agentId);
+        let firstMessage = groupCtx ? `${groupCtx}\n\n${content}` : content;
         if (planMode) {
             firstMessage += '\n\n---- Plan Mode ----\n'
                 + '⚠️ PLAN MODE\n'
@@ -377,11 +395,9 @@ export class GroupChatManager {
                 + 'Wait for user "execute" before any write action\n'
                 + '---- Plan Mode ----';
         }
-
-        // Send to first agent only
-        const firstAgent = targetAgents[0];
         const runId = crypto.randomUUID();
         this._pendingRunIds.set(runId, firstAgent.agentId);
+        console.log(`[GroupChat] Created runId ${runId} for firstAgent ${firstAgent.agentId}`);
         try {
             await this._gateway.sendChat(firstAgent.sessionKey, firstMessage, runId);
         } catch (err) {
@@ -398,12 +414,20 @@ export class GroupChatManager {
      * Build the chain context message for the next agent in the chain.
      */
     private _buildChainMessage(forAgent: AgentMember): string {
-        const lines: string[] = [
-            '[Chain Context — Group Collaboration]',
-            `Original user request: "${this._chainOriginalContent}"`,
-            '',
-            'Previous responses in this chain:',
-        ];
+        // Include broader group context (messages outside this chain)
+        const groupCtx = this._buildGroupContext(forAgent.agentId);
+
+        const lines: string[] = [];
+
+        if (groupCtx) {
+            lines.push(groupCtx);
+            lines.push('');
+        }
+
+        lines.push('[Chain Context — Group Collaboration]');
+        lines.push(`Original user request: "${this._chainOriginalContent}"`);
+        lines.push('');
+        lines.push('Previous responses in this chain:');
 
         for (const ctx of this._chainContext) {
             lines.push(`@${ctx.agentName}:`);
@@ -431,18 +455,15 @@ export class GroupChatManager {
         return lines.join('\n');
     }
 
-    private _buildGroupContext(excludeId: string): string {
-        const recent = this._messages
-            .filter(m => m.id !== excludeId)
-            .slice(-20);
+    /**
+     * Build group context from recent messages so each agent knows what others said.
+     * Used as a prefix when sending messages to agents.
+     * @param excludeAgentId - optional agent to exclude (don't show their own messages back)
+     */
+    private _buildGroupContext(excludeAgentId?: string): string {
+        const recent = this._messages.slice(-20);
 
         if (recent.length === 0) {
-            return '';
-        }
-
-        // Must have at least one user message in context (don't inject agent-only context)
-        const hasUserMsg = recent.some(m => m.role === 'user');
-        if (!hasUserMsg) {
             return '';
         }
 
@@ -450,12 +471,23 @@ export class GroupChatManager {
             '[Group Chat Context - Recent Messages]',
         ];
         for (const msg of recent) {
+            // Skip excluded agent's own messages
+            if (excludeAgentId && msg.agentId === excludeAgentId) { continue; }
+
             if (msg.role === 'user') {
                 lines.push(`User: ${msg.content}`);
             } else {
-                lines.push(`@${msg.agentName || msg.agentId}: ${msg.content}`);
+                // Truncate long responses to keep context manageable
+                const truncated = msg.content.length > 500
+                    ? msg.content.substring(0, 500) + '...(truncated)'
+                    : msg.content;
+                lines.push(`@${msg.agentName || msg.agentId}: ${truncated}`);
             }
         }
+
+        // Only return if there's actual content beyond the header
+        if (lines.length <= 1) { return ''; }
+
         lines.push('---');
         return lines.join('\n');
     }
@@ -464,28 +496,39 @@ export class GroupChatManager {
      * Build delegation message from one agent to another.
      * Includes the sender's FULL response inline so the recipient never
      * misses content due to group-context truncation.
+     * Also includes broader group context.
      */
     private _buildDelegationMessage(
         sender: AgentMember,
         content: string,
         mentionedAgent: AgentMember
     ): string {
-        return [
-            `[Group Chat — Task Delegation]`,
-            `From: @${sender.name || sender.agentId}`,
-            `To: @${mentionedAgent.name || mentionedAgent.agentId}`,
-            ``,
-            `Original user request:`,
-            `"${this._lastUserMessage}"`,
-            ``,
-            `Full message from @${sender.name || sender.agentId}:`,
-            `---`,
-            content,
-            `---`,
-            ``,
-            `You have been assigned this task. Please execute and report results back to the group.`,
-            `Keep your response concise and focused.`,
-        ].join('\n');
+        // Include broader group context (messages outside this delegation)
+        const groupCtx = this._buildGroupContext(mentionedAgent.agentId);
+
+        const lines: string[] = [];
+
+        if (groupCtx) {
+            lines.push(groupCtx);
+            lines.push('');
+        }
+
+        lines.push(`[Group Chat — Task Delegation]`);
+        lines.push(`From: @${sender.name || sender.agentId}`);
+        lines.push(`To: @${mentionedAgent.name || mentionedAgent.agentId}`);
+        lines.push(``);
+        lines.push(`Original user request:`);
+        lines.push(`"${this._lastUserMessage}"`);
+        lines.push(``);
+        lines.push(`Full message from @${sender.name || sender.agentId}:`);
+        lines.push(`---`);
+        lines.push(content);
+        lines.push(`---`);
+        lines.push(``);
+        lines.push(`You have been assigned this task. Please execute and report results back to the group.`);
+        lines.push(`Keep your response concise and focused.`);
+
+        return lines.join('\n');
     }
 
     /**
@@ -546,8 +589,7 @@ export class GroupChatManager {
             }
 
             // Filter sentinel messages — do not render or route
-            const trimmed = content.trim();
-            if (trimmed === 'NO_REPLY' || trimmed === 'HEARTBEAT_OK') {
+            if (isSentinelMessage(content)) {
                 return;
             }
 
@@ -580,9 +622,17 @@ export class GroupChatManager {
             if (this._chainQueue.length > 0) {
                 this._chainContext.push({ agentName: agent.name || agent.agentId, response: content });
                 const nextAgent = this._chainQueue.shift()!;
+
+                // Notify chain progress: next agent is now active, rest are queued
+                this._notifyChainProgress(
+                    nextAgent.agentId,
+                    this._chainQueue.map(a => a.agentId)
+                );
+
                 const chainMsg = this._buildChainMessage(nextAgent);
                 const nextRunId = crypto.randomUUID();
                 this._pendingRunIds.set(nextRunId, nextAgent.agentId);
+                console.log(`[GroupChat] Created chain runId ${nextRunId} for nextAgent ${nextAgent.agentId}`);
                 try {
                     await this._gateway!.sendChat(nextAgent.sessionKey, chainMsg, nextRunId);
                 } catch (err) {
@@ -647,6 +697,7 @@ export class GroupChatManager {
                     const delegationContent = this._buildDelegationMessage(agent, content, targetAgent);
                     const runId = crypto.randomUUID();
                     this._pendingRunIds.set(runId, targetAgent.agentId);
+                    console.log(`[GroupChat] Created delegation runId ${runId} for target ${targetAgent.agentId}`);
                     try {
                         await this._gateway!.sendChat(targetAgent.sessionKey, delegationContent, runId);
                     } catch (err) {
@@ -797,5 +848,19 @@ export class GroupChatManager {
         for (const cb of this._warningCallbacks) {
             try { cb(reason); } catch { /* ignore */ }
         }
+    }
+
+    private _notifyChainProgress(current: string, queued: string[]): void {
+        for (const cb of this._chainProgressCallbacks) {
+            try { cb({ current, queued }); } catch { /* ignore */ }
+        }
+    }
+
+    public onChainProgress(cb: GroupChainProgressCallback): void {
+        this._chainProgressCallbacks.push(cb);
+    }
+
+    public offChainProgress(cb: GroupChainProgressCallback): void {
+        this._chainProgressCallbacks = this._chainProgressCallbacks.filter(fn => fn !== cb);
     }
 }

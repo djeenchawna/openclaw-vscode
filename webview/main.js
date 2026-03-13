@@ -149,8 +149,10 @@
     let groupMode = false;
     let groupAgents = [];        // Array of { agentId, name, avatar, color }
     let groupWaitingIds = new Set(); // agentIds currently generating reply
+    let groupQueuedIds = [];         // agentIds queued in chain (ordered, not yet started)
     let respondedAgentHistory = []; // ordered stack of agentIds that have replied (newest first), for auto-@mention fallback
     let mentionPickerIndex = 0;  // selected index in mention picker
+    let mentionJustSelected = false; // หลังเลือกจาก picker แล้ว กด Enter จะส่งเลย
     let attachments = []; // { type: 'file'|'image'|'reference', name, path?, data? }
     let messageQueue = []; // 消息队列: { id, text, attachments, createdAt }
     let queueIdCounter = 0; // 队列 ID 计数器
@@ -646,6 +648,42 @@
     }
 
     /**
+     * Show per-agent queued indicator (waiting in chain).
+     */
+    function showAgentQueued(agentId) {
+        const agent = groupAgents.find(a => a.agentId === agentId);
+        if (!agent) { return; }
+
+        const existingId = `agent-queued-${agentId}`;
+        if (document.getElementById(existingId)) { return; }
+
+        const wasAtBottom = isScrolledToBottom();
+        const div = document.createElement('div');
+        div.className = 'agent-queued';
+        div.id = existingId;
+
+        const initial = (agent.name || agentId).charAt(0).toUpperCase();
+        const color = escapeHtml(agent.color || '#888');
+        const name = escapeHtml(agent.name || agentId);
+
+        div.innerHTML = `
+            <div class="agent-queued-avatar" style="background:${color}; opacity: 0.5;">${escapeHtml(initial)}</div>
+            <span style="color:${color}; opacity: 0.6;">${name}</span>
+            <span style="opacity: 0.5; font-size: 0.85em; margin-left: 4px;">⏳ queued</span>
+        `;
+        messages.appendChild(div);
+        if (wasAtBottom) { scrollToBottom(); }
+    }
+
+    /**
+     * Remove per-agent queued indicator.
+     */
+    function removeAgentQueued(agentId) {
+        const el = document.getElementById(`agent-queued-${agentId}`);
+        if (el) { el.remove(); }
+    }
+
+    /**
      * Show a transient warning toast in the chat area.
      */
     function showGroupWarningToast(text) {
@@ -945,12 +983,14 @@
         });
 
         mentionPickerEl.style.display = 'block';
+        updateSendButtonState(); // ปิดปุ่มส่งเมื่อ picker เปิด
     }
 
     function hideMentionPicker() {
         mentionPickerEl.style.display = 'none';
         mentionPickerList.innerHTML = '';
         mentionPickerIndex = 0;
+        updateSendButtonState(); // เปิดปุ่มส่งเมื่อ picker ปิด
     }
 
     function insertMentionFromPicker(agentName) {
@@ -967,6 +1007,7 @@
         const newPos = atIdx + inserted.length;
         messageInput.setSelectionRange(newPos, newPos);
         hideMentionPicker();
+        mentionJustSelected = true; // ทำเครื่องหมายว่าเพิ่งเลือกแล้ว
         messageInput.focus();
         autoResize();
     }
@@ -974,8 +1015,23 @@
     // Update mention picker on input
     messageInput.addEventListener('input', () => {
         autoResize();
+        mentionJustSelected = false; // reset เมื่อพิมพ์ใหม่
+        
+        // บังคับใช้ dropdown: ถ้ามี @ ที่พิมพ์เอง (ไม่ได้มาจากการเลือก) → ลบออก
+        const text = messageInput.value;
+        const pos = messageInput.selectionStart || 0;
+        const before = text.substring(0, pos);
+        
+        // ตรวจสอบว่ามี @ ที่ cursor หรือไม่
+        const atIdx = before.lastIndexOf('@');
+        if (atIdx !== -1 && !before.substring(atIdx).includes(' ')) {
+            // ตรวจว่า @ นี้มาจากไหน - ถ้าเป็นการพิมพ์เอง (ไม่มี mentionJustSelected) 
+            // ให้ลบ @ ออกและแสดง picker ให้เลือก
+        }
+        
         const result = getMentionQueryFromInput();
         if (result !== null && groupMode) {
+            // ถ้ามี @ ให้แสดง picker (ถ้า picker ซ่อนอยู่แสดงว่าพิมพ์เอง → block การพิมพ์)
             showMentionPicker(result.query);
         } else {
             hideMentionPicker();
@@ -984,10 +1040,44 @@
 
     // Navigate picker with keyboard
     messageInput.addEventListener('keydown', (e) => {
-        if (mentionPickerEl.style.display === 'none') { return; }
+        // ถ้า picker ปิด และไม่ได้เพิ่งเลือก → ไม่ต้องทำอะไร
+        if (mentionPickerEl.style.display === 'none' && !mentionJustSelected) { return; }
 
         const items = mentionPickerList.querySelectorAll('.mention-picker-item');
-        if (items.length === 0) { return; }
+
+        // ถ้า picker เปิดอยู่ → block Enter ทั้งหมด (บังคับให้คลิกหรือกด space)
+        if (mentionPickerEl.style.display !== 'none') {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                return; // ไม่ให้ส่งข้อความ
+            }
+            
+            // Space = เลือก agent ปัจจุบัน
+            if (e.key === ' ' && items.length > 0) {
+                e.preventDefault();
+                const active = items[mentionPickerIndex];
+                if (active) {
+                    insertMentionFromPicker(active.dataset.agentName || active.dataset.agentId || '');
+                }
+                return;
+            }
+        }
+
+        // ถ้าเพิ่งเลือก agent แล้ว และกด Enter อีกครั้ง → ส่งข้อความ
+        if (mentionJustSelected && e.key === 'Enter') {
+            mentionJustSelected = false;
+            return; // ให้ไปที่ keydown handler หลักเพื่อส่งข้อความ
+        }
+
+        if (e.key === 'Tab') {
+            // Tab = เลือก agent
+            const active = items[mentionPickerIndex];
+            if (active) {
+                e.preventDefault();
+                insertMentionFromPicker(active.dataset.agentName || active.dataset.agentId || '');
+            }
+            return;
+        }
 
         if (e.key === 'ArrowDown') {
             e.preventDefault();
@@ -1020,6 +1110,7 @@
 
     function updateSendButtonState() {
         const hasInput = messageInput.value.trim().length > 0 || attachments.length > 0;
+        const pickerOpen = mentionPickerEl.style.display !== 'none'; // ปิดปุ่มส่งเมื่อ picker เปิด
 
         if (isBusy()) {
             sendBtn.classList.remove('active');
@@ -1027,8 +1118,9 @@
             sendBtn.title = i18n.stop;
         } else {
             sendBtn.classList.remove('sending');
-            sendBtn.classList.toggle('active', hasInput);
-            sendBtn.title = i18n.send;
+            // ปิดปุ่มส่งเมื่อ picker เปิด หรือ ไม่มีข้อความ
+            sendBtn.classList.toggle('active', hasInput && !pickerOpen);
+            sendBtn.title = pickerOpen ? i18n.selectAgent : i18n.send;
         }
     }
 
@@ -1652,6 +1744,37 @@ Try:
 
         // ── Group mode: validate @mention BEFORE showing message ────────────
         if (groupMode && groupAgents.length > 0) {
+            // Deduplicate @mentions: remove duplicate @AgentName occurrences (keep first)
+            const seenMentions = new Set();
+            for (const agent of groupAgents) {
+                const mentionName = '@' + (agent.name || agent.agentId);
+                // Match all occurrences, keep the first, remove subsequent duplicates
+                let firstFound = false;
+                const mentionRegex = new RegExp(
+                    mentionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                    'gi'
+                );
+                fullMessage = fullMessage.replace(mentionRegex, (match) => {
+                    if (!firstFound) {
+                        firstFound = true;
+                        return match; // keep first occurrence
+                    }
+                    return ''; // remove duplicate
+                });
+                // Also update display text
+                let firstFoundText = false;
+                text = text.replace(mentionRegex, (match) => {
+                    if (!firstFoundText) {
+                        firstFoundText = true;
+                        return match;
+                    }
+                    return '';
+                });
+            }
+            // Clean up any double spaces from removal
+            fullMessage = fullMessage.replace(/  +/g, ' ').trim();
+            text = text.replace(/  +/g, ' ').trim();
+
             const hasMention = groupAgents.some(a =>
                 fullMessage.includes('@' + (a.name || a.agentId))
             );
@@ -2053,10 +2176,30 @@ Try:
 
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
-            // 输入法正在组字时（如中文拼音），不响应回车
-            if (e.isComposing || e.keyCode === 229) {
+            // ลด IME check: เฉพาะ isComposing=true จริง ๆ (keyCode 229 ถูกลบออก เพราะอาจ block Thai input)
+            if (e.isComposing) {
                 return;
             }
+
+            // ถ้า dropdown/picker เปิดอยู่ ให้ปิดก่อนแล้วไม่ส่งข้อความ
+            if (openDropdownId) {
+                e.preventDefault();
+                closeAllDropdowns();
+                return;
+            }
+            // ถ้า mention picker เปิดอยู่ → block Enter ไม่ให้ส่ง (บังคับเลือกจาก dropdown)
+            if (mentionPickerEl.style.display !== 'none') {
+                e.preventDefault();
+                // ไม่ hide picker เพื่อให้ user ยังเห็นและเลือกได้
+                return;
+            }
+            // ถ้า slash picker เปิดอยู่ ให้ปิดก่อนแล้วไม่ส่ง
+            if (slashPickerOverlay.classList.contains('show')) {
+                e.preventDefault();
+                hideSlashPicker();
+                return;
+            }
+
             e.preventDefault();
 
             const text = messageInput.value.trim();
@@ -2580,21 +2723,53 @@ Try:
                 break;
 
             case 'waitingGroupReply':
-                // Show per-agent thinking indicators
-                groupWaitingIds = new Set(message.agentIds || []);
-                for (const agentId of groupWaitingIds) {
-                    showAgentThinking(agentId);
+                // Chain mode: first agent = thinking, rest = queued status
+                {
+                    const agentIds = message.agentIds || [];
+                    groupWaitingIds = new Set(agentIds);
+                    if (agentIds.length > 0) {
+                        // First agent: active thinking indicator
+                        showAgentThinking(agentIds[0]);
+                        // Remaining agents: queued indicators (ordered)
+                        groupQueuedIds = agentIds.slice(1);
+                        for (const agentId of groupQueuedIds) {
+                            showAgentQueued(agentId);
+                        }
+                    }
                 }
                 isSending = true;
                 updateSendButtonState();
                 break;
 
+            case 'chainProgress':
+                // Chain advanced: new current agent + updated queue
+                {
+                    const { current, queued } = message;
+                    // Remove queued indicator for the agent that just became active
+                    removeAgentQueued(current);
+                    // Show thinking for the now-active agent
+                    showAgentThinking(current);
+                    // Update queued list (remove any that are no longer queued)
+                    const newQueuedSet = new Set(queued || []);
+                    for (const oldId of groupQueuedIds) {
+                        if (!newQueuedSet.has(oldId)) {
+                            removeAgentQueued(oldId);
+                        }
+                    }
+                    groupQueuedIds = queued || [];
+                }
+                break;
+
             case 'groupLoopWarning':
-                // Clear all agent thinking indicators
+                // Clear all agent thinking + queued indicators
                 for (const agentId of groupWaitingIds) {
                     removeAgentThinking(agentId);
                 }
+                for (const agentId of groupQueuedIds) {
+                    removeAgentQueued(agentId);
+                }
                 groupWaitingIds.clear();
+                groupQueuedIds = [];
                 isSending = false;
                 updateSendButtonState();
                 showGroupWarningToast(i18n.groupLoopWarning || '⚠️ Loop guard triggered.');

@@ -6,6 +6,7 @@
 /**
  * Parse @mentions from message text.
  * Matches both agent IDs and agent names (case-insensitive, Unicode-aware).
+ * Also matches first-name-only (e.g., "@Sebas" matches "Sebas Tian").
  * Always returns deduplicated list of agent IDs.
  */
 export function parseMentions(text: string, agents: Array<{ agentId: string; name: string }>): string[] {
@@ -15,9 +16,17 @@ export function parseMentions(text: string, agents: Array<{ agentId: string; nam
 
     while ((match = mentionRegex.exec(text)) !== null) {
         const token = match[1].toLowerCase();
-        const found = agents.find(
-            a => a.agentId.toLowerCase() === token || a.name.toLowerCase() === token
-        );
+        const found = agents.find(a => {
+            const nameLower = a.name.toLowerCase();
+            const idLower = a.agentId.toLowerCase();
+            // Exact match on agentId or full name
+            if (idLower === token || nameLower === token) {
+                return true;
+            }
+            // Match first word of name (e.g., "@Sebas" matches "Sebas Tian")
+            const firstName = nameLower.split(/\s+/)[0];
+            return firstName === token;
+        });
         if (found && !mentioned.includes(found.agentId)) {
             mentioned.push(found.agentId);
         }

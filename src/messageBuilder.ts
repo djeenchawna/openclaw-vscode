@@ -6,6 +6,20 @@ export interface BuildResult {
     workflowIncluded: boolean;
 }
 
+/**
+ * Check if content is a sentinel message (NO_REPLY, HEARTBEAT_OK)
+ * Filters out system-level responses that shouldn't be displayed in chat
+ * Works for both normal messages and messages ending with sentinel
+ */
+export function isSentinelMessage(content: string): boolean {
+    const trimmed = content.trim();
+    return (
+        trimmed === 'NO_REPLY' ||
+        trimmed === 'HEARTBEAT_OK' ||
+        trimmed.endsWith('HEARTBEAT_OK')
+    );
+}
+
 export class MessageBuilder {
     // Track which sessions have received workflow
     private workflowSent = new Set<string>();

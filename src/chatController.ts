@@ -101,6 +101,7 @@ export class ChatController {
     private _groupMessageCallback: ((msg: GroupMessage) => void) | null = null;
     private _groupStateCallback: ((agents: AgentMember[]) => void) | null = null;
     private _groupWarningCallback: GroupWarningCallback | null = null;
+    private _groupChainProgressCallback: ((progress: { current: string; queued: string[] }) => void) | null = null;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -170,6 +171,9 @@ export class ChatController {
         if (this._groupWarningCallback) {
             this._groupManager.offWarning(this._groupWarningCallback);
         }
+        if (this._groupChainProgressCallback) {
+            this._groupManager.offChainProgress(this._groupChainProgressCallback);
+        }
 
         // Group message → forward to webview
         this._groupMessageCallback = (msg: GroupMessage) => {
@@ -188,6 +192,12 @@ export class ChatController {
             this._webview?.postMessage({ type: 'groupLoopWarning', reason });
         };
         this._groupManager.onWarning(this._groupWarningCallback);
+
+        // Chain progress (current + queued agents) → notify webview
+        this._groupChainProgressCallback = (progress: { current: string; queued: string[] }) => {
+            this._webview?.postMessage({ type: 'chainProgress', current: progress.current, queued: progress.queued });
+        };
+        this._groupManager.onChainProgress(this._groupChainProgressCallback);
     }
 
     get sessionKey(): string {
@@ -348,7 +358,9 @@ export class ChatController {
                     this._groupManager.leaveGroup();
                     this._webview?.postMessage({ type: 'groupStateUpdate', agents: [] });
                 } else {
-                    vscode.commands.executeCommand('openclaw.addAgentToGroup');
+                    // Auto-add default agent when entering group mode
+                    const defaultAgentId = getAgentId();
+                    await this.addAgentToGroup(defaultAgentId);
                 }
                 break;
 
@@ -960,14 +972,26 @@ export class ChatController {
 
     // ── Group chat public API ─────────────────────────────────────────────────
 
-    public async addAgentToGroup(agentId: string): Promise<void> {
+    public async addAgentToGroup(agentId: string, model?: string): Promise<void> {
+        // Auto-add default agent if not already in group
+        const defaultAgentId = getAgentId();
+        if (!this._groupManager.hasAgent(defaultAgentId)) {
+            await this._groupManager.addAgent(defaultAgentId);
+        }
+
         const member = await this._groupManager.addAgent(agentId);
+        
+        // Set model if specified
+        if (model) {
+            await this._groupManager.setAgentModel(agentId, model);
+        }
+
         this._webview?.postMessage({
             type: 'groupStateUpdate',
             agents: this._groupManager.getAgents(),
         });
         vscode.window.showInformationMessage(
-            `OpenClaw Group: Added agent "${member.name || member.agentId}"`
+            `OpenClaw Group: Added agent "${member.name || member.agentId}"${model ? ` (using ${model})` : ''}`
         );
     }
 
@@ -1009,6 +1033,9 @@ export class ChatController {
         }
         if (this._groupWarningCallback) {
             this._groupManager.offWarning(this._groupWarningCallback);
+        }
+        if (this._groupChainProgressCallback) {
+            this._groupManager.offChainProgress(this._groupChainProgressCallback);
         }
         for (const d of this._disposables) {
             d.dispose();

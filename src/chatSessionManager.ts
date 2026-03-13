@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { getProjectConfig, ProjectConfig, ProjectSkill, ProjectWorkflow } from './projectScanner';
 import { getSkillMatcher } from './skillMatcher';
-import { getMessageBuilder } from './messageBuilder';
+import { getMessageBuilder, isSentinelMessage } from './messageBuilder';
 import { LanguageManager } from './languageManager';
 
 export interface ProjectStatusMessage {
@@ -463,7 +463,7 @@ export class ChatSessionManager {
                 }
 
                 // Filter sentinel messages (NO_REPLY, HEARTBEAT_OK)
-                if (content === 'NO_REPLY' || content === 'HEARTBEAT_OK') {
+                if (isSentinelMessage(content)) {
                     continue;
                 }
 
