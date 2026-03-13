@@ -168,11 +168,10 @@ export class GroupChatManager {
             // Strict runId guard: if the event carries a runId that we never issued
             // for this agent (i.e. a system-prompt fire-and-forget or an unrelated run),
             // skip it entirely. This prevents system-prompt NO_REPLY responses from
-            // being treated as user-triggered responses.
+            // being treated as user-triggered responses and causing duplicate messages.
             if (matchedAgent && eventRunId && !this._pendingRunIds.has(eventRunId)) {
-                // DEBUG: ยังคง allow เพื่อดูว่า message มาจริงหรือไม่
-                console.log(`[GroupChat] WARNING: runId ${eventRunId} not in pending, but allowing anyway for debug`);
-                // return; // Commented out for debugging - remove after confirmed working
+                console.log(`[GroupChat] Ignoring event with unknown runId ${eventRunId} for agent ${matchedAgent.agentId}`);
+                return;
             }
 
             if (!matchedAgent) {
@@ -555,7 +554,10 @@ export class GroupChatManager {
         }
 
         // Anti-loop: check response limit
-        this._responseCountThisRound++;
+        // Only count real responses (not retries from the same message)
+        if (retryCount === 0) {
+            this._responseCountThisRound++;
+        }
         if (this._responseCountThisRound > MAX_RESPONSES_PER_ROUND) {
             console.warn(`[GroupChat] Loop guard triggered — ${this._responseCountThisRound} responses this round`);
             this._notifyWarning('loop_limit');
@@ -599,6 +601,18 @@ export class GroupChatManager {
             // Update delegation counters
             this._agentResponseCount.set(agent.agentId, (this._agentResponseCount.get(agent.agentId) ?? 0) + 1);
             this._responseChain.push(agent.agentId);
+
+            // Deduplicate: check if this exact message was already shown
+            const lastMessage = this._messages[this._messages.length - 1];
+            const isDuplicate = lastMessage
+                && lastMessage.role === 'agent'
+                && lastMessage.agentId === agent.agentId
+                && lastMessage.content === content;
+
+            if (isDuplicate) {
+                console.log(`[GroupChat] Skipping duplicate message from ${agent.agentId}`);
+                return;
+            }
 
             // Always show agent message in UI
             const msg: GroupMessage = {
