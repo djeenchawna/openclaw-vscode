@@ -898,14 +898,15 @@ export class GatewayClient {
      * 设置会话模型（会话级覆盖）
      */
     public async setSessionModel(sessionKey: string, model: string): Promise<void> {
-        // 通过 chat.send 发送 /model 命令切换模型
+        // 通过 chat.send 发送 /model 命令切换模型 (fire-and-forget)
         // 注意：sessions.patch 只写 session store 的 modelOverride，
         // 但 dispatchInboundMessage 内部的 agent context 不会读取该 override，
-        // 必须通过 /model 命令走完整的模型切换流程
+        // 必须通过 /model 命令走完整的模型切换流程。
+        // 使用 fire-and-forget 避免 hang — /model 可能不返回 chat event
         if (this._mode === 'ws' && this._wsClient) {
             try {
                 const modelCmd = (!model || model === 'default') ? '/model default' : `/model ${model}`;
-                await this._wsClient.sendMessage(sessionKey, modelCmd);
+                this.sendMessageFireAndForget(sessionKey, modelCmd);
                 console.log(`OpenClaw: 会话 ${sessionKey} 模型已通过 /model 命令设置为 ${model || '默认'}`);
                 return;
             } catch (err) {

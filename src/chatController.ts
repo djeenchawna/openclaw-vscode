@@ -497,6 +497,9 @@ export class ChatController {
             // Propagate global model to group manager (used as default for agents without override)
             this._groupManager.setGlobalModel(model || undefined);
 
+            // Small delay to let /model command be processed before context setup
+            await new Promise(resolve => setTimeout(resolve, 300));
+
             // Resend context setup (language + workspace)
             await this._sessionManager.sendContextSetup(this._gateway, this._sessionKey);
         } catch (err: any) {
