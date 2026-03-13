@@ -49,7 +49,11 @@
         removeAgent: 'Remove from group',
         groupChat: 'Group Chat',
         groupModeHint: 'Use @name to mention a specific agent',
-        leaveGroup: 'Leave group'
+        leaveGroup: 'Leave group',
+        'ctx.setModel': 'Set Model',
+        'ctx.remove': 'Remove from group',
+        'ctx.modelDefault': 'Use Agent Default',
+        groupLoopWarning: '⚠️ Group loop guard triggered — agents stopped responding. Send a new message to continue.'
     };
 
     // Load locale
@@ -98,7 +102,11 @@
                 removeAgent: '从群组移除',
                 groupChat: '群组对话',
                 groupModeHint: '使用 @名称 提及特定助手',
-                leaveGroup: '离开群组'
+                leaveGroup: '离开群组',
+                'ctx.setModel': '切换模型',
+                'ctx.remove': '从群组移除',
+                'ctx.modelDefault': '使用助手默认模型',
+                groupLoopWarning: '⚠️ 检测到群组循环 — 已停止自动响应。发送新消息继续对话。'
             };
         }
         applyI18n();
@@ -613,6 +621,24 @@
     }
 
     /**
+     * Show a transient warning toast in the chat area.
+     */
+    function showGroupWarningToast(text) {
+        const existing = document.getElementById('groupWarningToast');
+        if (existing) { existing.remove(); }
+
+        const toast = document.createElement('div');
+        toast.id = 'groupWarningToast';
+        toast.className = 'group-warning-toast';
+        toast.textContent = text;
+        messages.appendChild(toast);
+        scrollToBottom();
+
+        // Auto-dismiss after 8 seconds
+        setTimeout(() => { toast.remove(); }, 8000);
+    }
+
+    /**
      * Update the group member bar based on current agent list.
      */
     function updateGroupMemberBar(agents) {
@@ -621,6 +647,7 @@
 
         if (!groupMode) {
             groupMemberBar.style.display = 'none';
+            messageInput.placeholder = i18n.sendPlaceholder || 'Ask a question...';
             return;
         }
 
@@ -630,14 +657,20 @@
         for (const agent of groupAgents) {
             const badge = document.createElement('div');
             badge.className = 'group-member-badge';
-            badge.title = `${agent.name || agent.agentId} — click × to remove`;
+            badge.title = `${agent.name || agent.agentId} — right-click for options`;
             badge.dataset.agentId = agent.agentId;
 
             const color = escapeHtml(agent.color || '#888');
             const name = escapeHtml(agent.name || agent.agentId);
+            // Model chip (only when overridden)
+            const modelChip = agent.modelOverride
+                ? `<span class="agent-model-chip" title="Model: ${escapeAttr(agent.modelOverride)}">⚡${escapeHtml(shortModelName(agent.modelOverride))}</span>`
+                : '';
+
             badge.innerHTML = `
                 <span class="group-member-dot" style="background:${color}"></span>
                 <span class="group-member-name">${name}</span>
+                ${modelChip}
                 <span class="group-member-remove" data-agent-id="${escapeAttr(agent.agentId)}" title="Remove">×</span>
             `;
             groupMembersEl.appendChild(badge);
@@ -645,6 +678,13 @@
 
         // update input placeholder hint
         messageInput.placeholder = i18n.groupModeHint || 'Use @name to mention a specific agent...';
+    }
+
+    /** Shorten model name: strip provider prefix, keep last segment */
+    function shortModelName(model) {
+        if (!model || model === 'default') { return 'default'; }
+        const parts = model.split('/');
+        return parts[parts.length - 1];
     }
 
     // Click on remove × in member badge
@@ -656,6 +696,141 @@
             vscode.postMessage({ type: 'removeAgentFromGroup', agentId });
         }
     });
+
+    // ── Agent Badge Context Menu ──────────────────────────────────────────────
+
+    let agentContextMenu = null; // currently open context menu element
+
+    function closeAgentContextMenu() {
+        if (agentContextMenu) {
+            agentContextMenu.remove();
+            agentContextMenu = null;
+        }
+    }
+
+    groupMembersEl.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const badge = e.target.closest('.group-member-badge');
+        if (!badge) { return; }
+        const agentId = badge.dataset.agentId;
+        if (!agentId) { return; }
+
+        closeAgentContextMenu();
+        openAgentContextMenu(agentId, badge);
+    });
+
+    // Close context menu on outside click
+    document.addEventListener('click', (e) => {
+        if (agentContextMenu && !agentContextMenu.contains(e.target)) {
+            closeAgentContextMenu();
+        }
+    });
+
+    function openAgentContextMenu(agentId, badgeEl) {
+        const agent = groupAgents.find(a => a.agentId === agentId);
+        if (!agent) { return; }
+
+        const menu = document.createElement('div');
+        menu.className = 'agent-context-menu';
+
+        // "Set Model" item with sub-menu trigger
+        const setModelItem = document.createElement('div');
+        setModelItem.className = 'agent-ctx-item';
+        setModelItem.innerHTML = `<span>⚡ ${escapeHtml(i18n['ctx.setModel'] || 'Set Model')}</span><span class="agent-ctx-arrow">▶</span>`;
+        setModelItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openModelSubMenu(agentId, agent.modelOverride, setModelItem);
+        });
+        menu.appendChild(setModelItem);
+
+        // Separator
+        const sep = document.createElement('div');
+        sep.className = 'agent-ctx-sep';
+        menu.appendChild(sep);
+
+        // "Remove" item
+        const removeItem = document.createElement('div');
+        removeItem.className = 'agent-ctx-item agent-ctx-danger';
+        removeItem.textContent = `✕ ${i18n['ctx.remove'] || 'Remove from group'}`;
+        removeItem.addEventListener('click', () => {
+            vscode.postMessage({ type: 'removeAgentFromGroup', agentId });
+            closeAgentContextMenu();
+        });
+        menu.appendChild(removeItem);
+
+        // Position below badge
+        document.body.appendChild(menu);
+        const rect = badgeEl.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = (rect.bottom + 4) + 'px';
+
+        agentContextMenu = menu;
+    }
+
+    function openModelSubMenu(agentId, currentModel, parentItem) {
+        // Remove existing sub-menu
+        const existing = document.querySelector('.agent-model-submenu');
+        if (existing) { existing.remove(); }
+
+        // Build model list: "Default" + available models from current modelOptions
+        const modelItems = [];
+        // Collect from existing model dropdown options
+        const optEls = modelOptionsEl.querySelectorAll('.dropdown-option');
+        optEls.forEach(el => {
+            const val = el.dataset.value;
+            if (val) { modelItems.push(val); }
+        });
+
+        const sub = document.createElement('div');
+        sub.className = 'agent-context-menu agent-model-submenu';
+
+        // "Use Default" option first
+        const defaultItem = document.createElement('div');
+        defaultItem.className = 'agent-ctx-item' + (!currentModel ? ' agent-ctx-active' : '');
+        defaultItem.textContent = `○ ${i18n['ctx.modelDefault'] || 'Use Agent Default'}`;
+        defaultItem.addEventListener('click', () => {
+            vscode.postMessage({ type: 'setAgentModel', agentId, model: null });
+            closeAgentContextMenu();
+        });
+        sub.appendChild(defaultItem);
+
+        // Separator
+        if (modelItems.length > 0) {
+            const sep = document.createElement('div');
+            sep.className = 'agent-ctx-sep';
+            sub.appendChild(sep);
+        }
+
+        for (const model of modelItems) {
+            const item = document.createElement('div');
+            item.className = 'agent-ctx-item' + (currentModel === model ? ' agent-ctx-active' : '');
+            item.textContent = `${currentModel === model ? '●' : '○'} ${shortModelName(model)}`;
+            item.title = model;
+            item.addEventListener('click', () => {
+                vscode.postMessage({ type: 'setAgentModel', agentId, model });
+                closeAgentContextMenu();
+            });
+            sub.appendChild(item);
+        }
+
+        document.body.appendChild(sub);
+
+        // Position to the right of the parent item
+        const parentRect = parentItem.getBoundingClientRect();
+        sub.style.left = (parentRect.right + 4) + 'px';
+        sub.style.top = parentRect.top + 'px';
+
+        // Ensure sub-menu doesn't go off-screen
+        requestAnimationFrame(() => {
+            const subRect = sub.getBoundingClientRect();
+            if (subRect.right > window.innerWidth) {
+                sub.style.left = (parentRect.left - subRect.width - 4) + 'px';
+            }
+            if (subRect.bottom > window.innerHeight) {
+                sub.style.top = (window.innerHeight - subRect.height - 4) + 'px';
+            }
+        });
+    }
 
     // Click + button to add agent
     groupAddBtn.addEventListener('click', () => {
@@ -2301,6 +2476,17 @@ Try:
                 }
                 isSending = true;
                 updateSendButtonState();
+                break;
+
+            case 'groupLoopWarning':
+                // Clear all agent thinking indicators
+                for (const agentId of groupWaitingIds) {
+                    removeAgentThinking(agentId);
+                }
+                groupWaitingIds.clear();
+                isSending = false;
+                updateSendButtonState();
+                showGroupWarningToast(i18n.groupLoopWarning || '⚠️ Loop guard triggered.');
                 break;
         }
     });

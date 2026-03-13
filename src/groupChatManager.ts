@@ -20,6 +20,18 @@ export const AGENT_COLORS = [
     '#84cc16', // lime
 ];
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+/** Max agent responses allowed per single user message (anti-loop) */
+const MAX_RESPONSES_PER_ROUND = 10;
+
+/** Guard instruction injected at the top of every group context */
+const LOOP_GUARD_PROMPT =
+    '[RULE: You are in a group chat with the user and other agents. ' +
+    'Only respond to the user\'s message above. ' +
+    'Do NOT reply just because another agent spoke. ' +
+    'Do NOT initiate new topics or ask other agents questions. ' +
+    'Wait for the user to direct you.]';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface AgentMember {
     agentId: string;
@@ -27,6 +39,7 @@ export interface AgentMember {
     name: string;
     avatar: string;
     color: string;
+    modelOverride?: string;   // undefined = use agent's configured default
 }
 
 export interface GroupMessage {
@@ -42,6 +55,7 @@ export interface GroupMessage {
 
 export type GroupMessageCallback = (msg: GroupMessage) => void;
 export type GroupStateCallback = (agents: AgentMember[]) => void;
+export type GroupWarningCallback = (reason: 'loop_limit') => void;
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 export class GroupChatManager {
@@ -56,9 +70,15 @@ export class GroupChatManager {
     // runId → agentId mapping for in-flight requests
     private _pendingRunIds: Map<string, string> = new Map();
 
+    // Anti-loop: count agent responses since last user message
+    private _responseCountThisRound: number = 0;
+    // Anti-loop: only fan-out triggered by user send
+    private _userMessageInFlight: boolean = false;
+
     // Callbacks
     private _messageCallbacks: GroupMessageCallback[] = [];
     private _stateCallbacks: GroupStateCallback[] = [];
+    private _warningCallbacks: GroupWarningCallback[] = [];
 
     // Gateway chat event handler
     private _chatEventHandler: ((payload: any) => void) | null = null;
@@ -213,6 +233,10 @@ export class GroupChatManager {
             throw new Error('GroupChatManager not initialized');
         }
 
+        // Anti-loop: reset round counter and set in-flight flag
+        this._responseCountThisRound = 0;
+        this._userMessageInFlight = true;
+
         const agentIds = Array.from(this._agents.keys());
         const mentions = parseMentions(content, agentIds);
 
@@ -258,6 +282,7 @@ export class GroupChatManager {
             }
         }
 
+        this._userMessageInFlight = false;
         return runIds;
     }
 
@@ -270,7 +295,17 @@ export class GroupChatManager {
             return '';
         }
 
-        const lines: string[] = ['[Group Chat Context - Recent Messages]'];
+        // Must have at least one user message in context (don't inject agent-only context)
+        const hasUserMsg = recent.some(m => m.role === 'user');
+        if (!hasUserMsg) {
+            return '';
+        }
+
+        const lines: string[] = [
+            LOOP_GUARD_PROMPT,
+            '',
+            '[Group Chat Context - Recent Messages]',
+        ];
         for (const msg of recent) {
             if (msg.role === 'user') {
                 lines.push(`User: ${msg.content}`);
@@ -286,6 +321,15 @@ export class GroupChatManager {
         if (!this._gateway) {
             return;
         }
+
+        // Anti-loop: check response limit
+        this._responseCountThisRound++;
+        if (this._responseCountThisRound > MAX_RESPONSES_PER_ROUND) {
+            console.warn(`[GroupChat] Loop guard triggered — ${this._responseCountThisRound} responses this round`);
+            this._notifyWarning('loop_limit');
+            return;
+        }
+
         try {
             const history = await this._gateway.getHistory(agent.sessionKey, 10);
             const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
@@ -336,6 +380,34 @@ export class GroupChatManager {
         this._messages = [];
     }
 
+    // ── Per-Agent Model ───────────────────────────────────────────────────────
+
+    /**
+     * Override model for a specific agent.
+     * Pass undefined to clear override (revert to agent default).
+     */
+    public async setAgentModel(agentId: string, model: string | undefined): Promise<void> {
+        const agent = this._agents.get(agentId);
+        if (!agent) {
+            return;
+        }
+
+        agent.modelOverride = model;
+
+        // Apply to agent's session via /model command
+        if (this._gateway) {
+            try {
+                const cmd = model ? `/model ${model}` : '/model default';
+                // Use sendChat fire-and-forget equivalent
+                this._gateway.sendMessageFireAndForget(agent.sessionKey, cmd);
+            } catch (err) {
+                console.warn(`[GroupChat] setAgentModel failed for ${agentId}:`, err);
+            }
+        }
+
+        this._notifyState();
+    }
+
     // ── Cleanup ───────────────────────────────────────────────────────────────
 
     /**
@@ -364,6 +436,7 @@ export class GroupChatManager {
         this.leaveGroup();
         this._messageCallbacks = [];
         this._stateCallbacks = [];
+        this._warningCallbacks = [];
     }
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
@@ -384,6 +457,14 @@ export class GroupChatManager {
         this._stateCallbacks = this._stateCallbacks.filter(fn => fn !== cb);
     }
 
+    public onWarning(cb: GroupWarningCallback): void {
+        this._warningCallbacks.push(cb);
+    }
+
+    public offWarning(cb: GroupWarningCallback): void {
+        this._warningCallbacks = this._warningCallbacks.filter(fn => fn !== cb);
+    }
+
     private _notifyMessage(msg: GroupMessage): void {
         for (const cb of this._messageCallbacks) {
             try { cb(msg); } catch { /* ignore */ }
@@ -394,6 +475,12 @@ export class GroupChatManager {
         const agents = this.getAgents();
         for (const cb of this._stateCallbacks) {
             try { cb(agents); } catch { /* ignore */ }
+        }
+    }
+
+    private _notifyWarning(reason: 'loop_limit'): void {
+        for (const cb of this._warningCallbacks) {
+            try { cb(reason); } catch { /* ignore */ }
         }
     }
 }

@@ -7,7 +7,7 @@ import { ChangeManager } from './changeManager';
 import { DiffProvider } from './diffProvider';
 import { LanguageManager } from './languageManager';
 import { getAgentId, buildSessionKey } from './agentConfig';
-import { GroupChatManager, GroupMessage, AgentMember } from './groupChatManager';
+import { GroupChatManager, GroupMessage, AgentMember, GroupWarningCallback } from './groupChatManager';
 
 // i18n helper - 语言跟随 openclaw.aiOutputLanguage 设置
 function getLocale(): string {
@@ -100,6 +100,7 @@ export class ChatController {
     private _groupManager: GroupChatManager;
     private _groupMessageCallback: ((msg: GroupMessage) => void) | null = null;
     private _groupStateCallback: ((agents: AgentMember[]) => void) | null = null;
+    private _groupWarningCallback: GroupWarningCallback | null = null;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -155,6 +156,9 @@ export class ChatController {
         if (this._groupStateCallback) {
             this._groupManager.offStateChange(this._groupStateCallback);
         }
+        if (this._groupWarningCallback) {
+            this._groupManager.offWarning(this._groupWarningCallback);
+        }
 
         // Group message → forward to webview
         this._groupMessageCallback = (msg: GroupMessage) => {
@@ -162,11 +166,17 @@ export class ChatController {
         };
         this._groupManager.onMessage(this._groupMessageCallback);
 
-        // Group state change (agents added/removed) → notify webview
+        // Group state change (agents added/removed/model changed) → notify webview
         this._groupStateCallback = (agents: AgentMember[]) => {
             this._webview?.postMessage({ type: 'groupStateUpdate', agents });
         };
         this._groupManager.onStateChange(this._groupStateCallback);
+
+        // Loop guard warning → notify webview
+        this._groupWarningCallback = (reason: 'loop_limit') => {
+            this._webview?.postMessage({ type: 'groupLoopWarning', reason });
+        };
+        this._groupManager.onWarning(this._groupWarningCallback);
     }
 
     get sessionKey(): string {
@@ -320,6 +330,12 @@ export class ChatController {
 
             case 'sendGroupMessage':
                 await this._sendGroupMessage(data.content);
+                break;
+
+            case 'setAgentModel':
+                if (data.agentId) {
+                    await this._groupManager.setAgentModel(data.agentId, data.model || undefined);
+                }
                 break;
 
             case 'openFile':
@@ -967,6 +983,9 @@ export class ChatController {
         }
         if (this._groupStateCallback) {
             this._groupManager.offStateChange(this._groupStateCallback);
+        }
+        if (this._groupWarningCallback) {
+            this._groupManager.offWarning(this._groupWarningCallback);
         }
         for (const d of this._disposables) {
             d.dispose();
