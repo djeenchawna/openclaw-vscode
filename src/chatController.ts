@@ -7,7 +7,7 @@ import { ChangeManager } from './changeManager';
 import { DiffProvider } from './diffProvider';
 import { LanguageManager } from './languageManager';
 import { getAgentId, buildSessionKey } from './agentConfig';
-import { GroupChatManager, GroupMessage, AgentMember, GroupWarningCallback } from './groupChatManager';
+import { GroupChatManager, GroupMessage, AgentMember, GroupWarningCallback, GroupLoopModeCallback, GroupAutoMessageCallback } from './groupChatManager';
 
 // i18n helper - 语言跟随 openclaw.aiOutputLanguage 设置
 function getLocale(): string {
@@ -102,6 +102,8 @@ export class ChatController {
     private _groupStateCallback: ((agents: AgentMember[]) => void) | null = null;
     private _groupWarningCallback: GroupWarningCallback | null = null;
     private _groupChainProgressCallback: ((progress: { current: string; queued: string[] }) => void) | null = null;
+    private _groupLoopModeCallback: GroupLoopModeCallback | null = null;
+    private _groupAutoMessageCallback: GroupAutoMessageCallback | null = null;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -174,6 +176,12 @@ export class ChatController {
         if (this._groupChainProgressCallback) {
             this._groupManager.offChainProgress(this._groupChainProgressCallback);
         }
+        if (this._groupLoopModeCallback) {
+            this._groupManager.offLoopModeChange(this._groupLoopModeCallback);
+        }
+        if (this._groupAutoMessageCallback) {
+            this._groupManager.offAutoMessage(this._groupAutoMessageCallback);
+        }
 
         // Group message → forward to webview
         this._groupMessageCallback = (msg: GroupMessage) => {
@@ -198,6 +206,18 @@ export class ChatController {
             this._webview?.postMessage({ type: 'chainProgress', current: progress.current, queued: progress.queued });
         };
         this._groupManager.onChainProgress(this._groupChainProgressCallback);
+
+        // Loop Mode toggle → notify webview
+        this._groupLoopModeCallback = (enabled: boolean) => {
+            this._webview?.postMessage({ type: 'loopModeToggled', enabled });
+        };
+        this._groupManager.onLoopModeChange(this._groupLoopModeCallback);
+
+        // Auto-loop message → forward to webview
+        this._groupAutoMessageCallback = (msg: { type: 'autoLoop'; content: string }) => {
+            this._webview?.postMessage({ type: 'autoLoopMessage', content: msg.content });
+        };
+        this._groupManager.onAutoMessage(this._groupAutoMessageCallback);
     }
 
     get sessionKey(): string {
@@ -347,10 +367,23 @@ export class ChatController {
                     type: 'groupStateUpdate',
                     agents: this._groupManager.getAgents(),
                 });
+                // Also send current loop mode state (for restore on ready)
+                this._webview?.postMessage({
+                    type: 'loopModeToggled',
+                    enabled: this._groupManager.isLoopModeEnabled(),
+                });
                 break;
 
             case 'sendGroupMessage':
                 await this._sendGroupMessage(data.content);
+                break;
+
+            case 'toggleLoopMode':
+                {
+                    const newState = this._groupManager.toggleLoopMode();
+                    // Callback already notifies webview via _groupLoopModeCallback
+                    console.log(`[ChatController] Loop Mode toggled: ${newState}`);
+                }
                 break;
 
             case 'toggleGroupMode':

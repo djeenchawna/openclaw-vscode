@@ -57,7 +57,11 @@
         groupToggle: 'Add agent to group',
         groupCostWarning: 'Group mode sends your message to all agents — token usage is multiplied',
         delegation: 'delegation',
-        groupMentionRequired: '⚠️ Please @mention at least one agent to send a message (e.g. @AgentName your request).'
+        groupMentionRequired: '⚠️ Please @mention at least one agent to send a message (e.g. @AgentName your request).',
+        loopMode: 'Loop Mode',
+        loopModeOn: '🔴 Loop Mode ON — agents auto-route via name mentions',
+        loopModeOff: '🟢 Loop Mode OFF',
+        autoLoop: '🔄 auto'
     };
 
     // Load locale
@@ -114,7 +118,11 @@
                 groupToggle: '添加助手到群组',
                 groupCostWarning: '群组模式会将消息发送给所有助手，Token 用量成倍增加',
                 delegation: '任务委派',
-                groupMentionRequired: '⚠️ Please @mention at least one agent to send a message (e.g. @AgentName your request).'
+                groupMentionRequired: '⚠️ Please @mention at least one agent to send a message (e.g. @AgentName your request).',
+                loopMode: '循环模式',
+                loopModeOn: '🔴 循环模式开启 — 助手通过名称提及自动路由',
+                loopModeOff: '🟢 循环模式关闭',
+                autoLoop: '🔄 自动'
             };
         }
         applyI18n();
@@ -150,6 +158,7 @@
     let groupAgents = [];        // Array of { agentId, name, avatar, color }
     let groupWaitingIds = new Set(); // agentIds currently generating reply
     let groupQueuedIds = [];         // agentIds queued in chain (ordered, not yet started)
+    let loopModeEnabled = false; // Loop Mode state (auto-route via plain-text name mentions)
     let respondedAgentHistory = []; // ordered stack of agentIds that have replied (newest first), for auto-@mention fallback
     let mentionPickerIndex = 0;  // selected index in mention picker
     let mentionJustSelected = false; // หลังเลือกจาก picker แล้ว กด Enter จะส่งเลย
@@ -243,6 +252,7 @@
     const groupMemberBar = document.getElementById('groupMemberBar');
     const groupMembersEl = document.getElementById('groupMembers');
     const groupToggleBtn = document.getElementById('groupToggleBtn');
+    const loopModeBtn = document.getElementById('loopModeBtn');
     const mentionPickerEl = document.getElementById('mentionPicker');
     const mentionPickerList = document.getElementById('mentionPickerList');
 
@@ -790,7 +800,32 @@
         // update input placeholder hint
         messageInput.placeholder = i18n.groupModeHint || 'Use @name to mention a specific agent...';
 
+        // Show/hide Loop Mode button: only when > 1 agent in group
+        if (loopModeBtn) {
+            loopModeBtn.style.display = groupAgents.length > 1 ? 'inline-flex' : 'none';
+            updateLoopModeBtn();
+        }
+
         updateGroupToggleBtn();
+    }
+
+    // ── Loop Mode Button ──────────────────────────────────────────────────────
+
+    function updateLoopModeBtn() {
+        if (!loopModeBtn) { return; }
+        if (loopModeEnabled) {
+            loopModeBtn.classList.add('active');
+            loopModeBtn.title = i18n.loopModeOn || '🔴 Loop Mode ON — agents auto-route via name mentions';
+        } else {
+            loopModeBtn.classList.remove('active');
+            loopModeBtn.title = i18n.loopModeOff || '🟢 Loop Mode OFF';
+        }
+    }
+
+    if (loopModeBtn) {
+        loopModeBtn.addEventListener('click', () => {
+            vscode.postMessage({ type: 'toggleLoopMode' });
+        });
     }
 
     /** Shorten model name: strip provider prefix, keep last segment */
@@ -2814,6 +2849,26 @@ Try:
                 isSending = false;
                 updateSendButtonState();
                 showGroupWarningToast(i18n.groupLoopWarning || '⚠️ Loop guard triggered.');
+                break;
+
+            case 'loopModeToggled':
+                loopModeEnabled = !!message.enabled;
+                updateLoopModeBtn();
+                break;
+
+            case 'autoLoopMessage':
+                // Display auto-generated loop message as a user bubble with "🔄 auto" tag
+                {
+                    const autoContent = message.content || '';
+                    if (autoContent) {
+                        const div = document.createElement('div');
+                        div.className = 'message user';
+                        div.innerHTML = `<div class="auto-loop-tag">${escapeHtml(i18n.autoLoop || '🔄 auto')}</div>`
+                            + `<div class="message-content">${renderMarkdown(autoContent)}</div>`;
+                        messages.appendChild(div);
+                        scrollToBottom();
+                    }
+                }
                 break;
         }
     });

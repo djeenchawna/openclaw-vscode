@@ -7,7 +7,7 @@
 import * as vscode from 'vscode';
 import { GatewayClient } from './gateway';
 import { buildSessionKey } from './agentConfig';
-import { parseMentions } from './mentionParser';
+import { parseMentions, parseLoopMentions } from './mentionParser';
 import { isSentinelMessage } from './messageBuilder';
 
 // ─── Color palette ────────────────────────────────────────────────────────────
@@ -61,6 +61,8 @@ export type GroupMessageCallback = (msg: GroupMessage) => void;
 export type GroupStateCallback = (agents: AgentMember[]) => void;
 export type GroupWarningCallback = (reason: 'loop_limit') => void;
 export type GroupChainProgressCallback = (progress: { current: string; queued: string[] }) => void;
+export type GroupLoopModeCallback = (enabled: boolean) => void;
+export type GroupAutoMessageCallback = (msg: { type: 'autoLoop'; content: string }) => void;
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 export class GroupChatManager {
@@ -97,11 +99,16 @@ export class GroupChatManager {
     private _chainOriginalContent: string = '';
     private _chainPlanMode: boolean = false;
 
+    // Loop Mode (auto-routing based on plain-text agent mentions)
+    private _loopModeEnabled: boolean = false;
+
     // Callbacks
     private _messageCallbacks: GroupMessageCallback[] = [];
     private _stateCallbacks: GroupStateCallback[] = [];
     private _warningCallbacks: GroupWarningCallback[] = [];
     private _chainProgressCallbacks: GroupChainProgressCallback[] = [];
+    private _loopModeCallbacks: GroupLoopModeCallback[] = [];
+    private _autoMessageCallbacks: GroupAutoMessageCallback[] = [];
 
     // Gateway chat event handler
     private _chatEventHandler: ((payload: any) => void) | null = null;
@@ -315,6 +322,25 @@ export class GroupChatManager {
 
     public isGroupMode(): boolean {
         return this._agents.size > 0;
+    }
+
+    // ── Loop Mode Management ──────────────────────────────────────────────────
+
+    public toggleLoopMode(): boolean {
+        this._loopModeEnabled = !this._loopModeEnabled;
+        this._notifyLoopMode(this._loopModeEnabled);
+        return this._loopModeEnabled;
+    }
+
+    public isLoopModeEnabled(): boolean {
+        return this._loopModeEnabled;
+    }
+
+    public setLoopMode(enabled: boolean): void {
+        if (this._loopModeEnabled !== enabled) {
+            this._loopModeEnabled = enabled;
+            this._notifyLoopMode(this._loopModeEnabled);
+        }
     }
 
     // ── System Prompt Broadcasting ────────────────────────────────────────────
@@ -754,6 +780,41 @@ export class GroupChatManager {
                     }
                 }
             }
+
+            // ── Loop Mode: auto-route via plain-text name mentions ────────────
+            // Only fires when:
+            //   1. Loop Mode is enabled
+            //   2. Chain queue is empty (not mid-chain)
+            //   3. Delegation didn't already route (avoid double-fire)
+            //   4. There are agents mentioned by name (without @)
+            if (this._loopModeEnabled && this._chainQueue.length === 0 && !shouldRoute) {
+                const loopTargetIds = parseLoopMentions(content, agents, agent.agentId);
+
+                if (loopTargetIds.length > 0) {
+                    // Build auto user message with full @name mentions
+                    const autoMentions = loopTargetIds
+                        .map(id => {
+                            const a = this._agents.get(id);
+                            return a ? `@${a.name}` : `@${id}`;
+                        })
+                        .join(' ');
+
+                    const autoContent = autoMentions;
+
+                    console.log(`[GroupChat] Loop Mode auto-routing: "${autoContent}" (triggered by ${agent.agentId})`);
+
+                    // Notify UI about the auto-generated message
+                    this._notifyAutoMessage({ type: 'autoLoop', content: autoContent });
+
+                    // Fire as a new group message (reuses the existing sendGroupMessage chain logic)
+                    // Small delay to allow UI to update with the agent's response first
+                    setTimeout(() => {
+                        this.sendGroupMessage(autoContent, this._chainPlanMode).catch(err => {
+                            console.error(`[GroupChat] Loop Mode auto-send failed:`, err);
+                        });
+                    }, 300);
+                }
+            }
         } catch (err) {
             console.warn(`[GroupChat] Failed to fetch message for ${agent.agentId}:`, err);
         }
@@ -918,6 +979,9 @@ export class GroupChatManager {
         this._chainOriginalContent = '';
         this._chainPlanMode = false;
 
+        // Reset loop mode
+        this._loopModeEnabled = false;
+
         this._notifyState();
     }
 
@@ -930,6 +994,9 @@ export class GroupChatManager {
         this._messageCallbacks = [];
         this._stateCallbacks = [];
         this._warningCallbacks = [];
+        this._chainProgressCallbacks = [];
+        this._loopModeCallbacks = [];
+        this._autoMessageCallbacks = [];
     }
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
@@ -989,5 +1056,35 @@ export class GroupChatManager {
 
     public offChainProgress(cb: GroupChainProgressCallback): void {
         this._chainProgressCallbacks = this._chainProgressCallbacks.filter(fn => fn !== cb);
+    }
+
+    // ── Loop Mode callbacks ───────────────────────────────────────────────────
+
+    private _notifyLoopMode(enabled: boolean): void {
+        for (const cb of this._loopModeCallbacks) {
+            try { cb(enabled); } catch { /* ignore */ }
+        }
+    }
+
+    public onLoopModeChange(cb: GroupLoopModeCallback): void {
+        this._loopModeCallbacks.push(cb);
+    }
+
+    public offLoopModeChange(cb: GroupLoopModeCallback): void {
+        this._loopModeCallbacks = this._loopModeCallbacks.filter(fn => fn !== cb);
+    }
+
+    private _notifyAutoMessage(msg: { type: 'autoLoop'; content: string }): void {
+        for (const cb of this._autoMessageCallbacks) {
+            try { cb(msg); } catch { /* ignore */ }
+        }
+    }
+
+    public onAutoMessage(cb: GroupAutoMessageCallback): void {
+        this._autoMessageCallbacks.push(cb);
+    }
+
+    public offAutoMessage(cb: GroupAutoMessageCallback): void {
+        this._autoMessageCallbacks = this._autoMessageCallbacks.filter(fn => fn !== cb);
     }
 }

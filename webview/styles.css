@@ -1939,6 +1939,58 @@ body {
     color: var(--vscode-errorForeground, #f44);
 }
 
+/* Loop Mode Button */
+.loop-mode-btn {
+    background: none;
+    border: none;
+    color: var(--vscode-descriptionForeground);
+    cursor: pointer;
+    padding: 2px 6px;
+    opacity: 0.6;
+    transition: opacity 0.15s, color 0.15s;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.loop-mode-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* OFF state (green) */
+.loop-mode-btn:not(.active) {
+    color: var(--vscode-terminal-ansiBrightGreen, #22c55e);
+    opacity: 0.7;
+}
+
+.loop-mode-btn:not(.active):hover {
+    opacity: 1;
+}
+
+/* ON state (red) */
+.loop-mode-btn.active {
+    color: var(--vscode-terminal-ansiRed, #ef4444);
+    opacity: 1;
+    animation: loop-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes loop-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Auto-loop message tag */
+.auto-loop-tag {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.7;
+    margin-bottom: 4px;
+    padding: 0 4px;
+}
+
 /* Delegation indicator */
 .group-delegation-indicator {
     font-size: 10px;
