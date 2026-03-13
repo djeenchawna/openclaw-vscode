@@ -462,6 +462,11 @@ export class ChatSessionManager {
                     continue;
                 }
 
+                // Filter sentinel messages (NO_REPLY, HEARTBEAT_OK)
+                if (content === 'NO_REPLY' || content === 'HEARTBEAT_OK') {
+                    continue;
+                }
+
                 // 跳过没有内容也没有工具调用的消息
                 if (!content && toolCalls.length === 0) continue;
 

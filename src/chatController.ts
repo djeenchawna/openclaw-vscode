@@ -111,11 +111,12 @@ export class ChatController {
         const config = vscode.workspace.getConfiguration('openclaw');
         this._planMode = config.get<boolean>('planMode') || false;
 
-        // Initialize group chat manager singleton
+        // Initialize group chat manager singleton.
+        // Extract a stable windowId from the VSCode session — NOT from the sessionKey,
+        // because panel keys use a different format (vscode-panel-{windowId}-{panelId})
+        // and split('-').pop() would wrongly return the panelId instead of windowId.
         this._groupManager = GroupChatManager.getInstance();
-        const windowId = _sessionKey.includes('vscode-main-')
-            ? _sessionKey.split('vscode-main-')[1]
-            : _sessionKey.split('-').pop() || 'default';
+        const windowId = vscode.env.sessionId.slice(0, 8);
         this._groupManager.initialize(_gateway, windowId);
 
         // 监听 Group Chat delegation depth 配置变化
@@ -442,6 +443,9 @@ export class ChatController {
             await this._gateway.setSessionModel(this._sessionKey, model);
             vscode.window.showInformationMessage(`Model switched to: ${model}`);
 
+            // Propagate global model to group manager (used as default for agents without override)
+            this._groupManager.setGlobalModel(model || undefined);
+
             // Resend context setup (language + workspace)
             await this._sessionManager.sendContextSetup(this._gateway, this._sessionKey);
         } catch (err: any) {
@@ -534,7 +538,7 @@ export class ChatController {
                 const customPrompt = vscode.workspace.getConfiguration('openclaw').get<string>('planModePrompt', '').trim();
                 const marker = isZh ? '---- 计划模式 ----' : '---- Plan Mode ----';
                 const body = customPrompt || (isZh
-                    ? '⚠️ 计划模式\nዝፍቀድ: ምንባብ፣ ምድላይ፣ ምዝርዛር\nክልኩል: ምጽሓፍ፣ ምቕያር፣ ምድምሳስ፣ ምፍጻም\nስጉምትታት: 1) ነቲ ዕማም ምርዳእ 2) ኣብ ንኣሽቱ ንኡሳን ዕማማት ምብታን 3) ንነፍሲ ​​ወከፍ ስጉምቲ ዕላማን ጽልዋን ግለጽ\nውጽኢት: ደረጃ ብደረጃ ውጥን\nቅድሚ ዝኾነ ናይ ጽሕፈት ስጉምቲ ተጠቃሚ "ክፍጽም" ተጸበ'
+                    ? '⚠️ 计划模式\n允许: 读取、搜索、列表\n禁止: 写入、修改、删除、执行\n步骤: 1) 理解任务 2) 拆分为小的子任务 3) 描述每个步骤的目标和影响\n输出: 逐步计划\n等待用户输入 "执行" 后再执行任何写操作'
                     : '⚠️ PLAN MODE\nAllowed: read, search, list\nForbidden: write, modify, delete, execute\nSteps: 1) Understand the task 2) Break into small sub-tasks 3) Describe goal and impact for each step\nOutput: step-by-step plan\nWait for user "execute" before any write action');
                 messageToSend += `\n\n${marker}\n${body}\n${marker}`;
             }
@@ -983,8 +987,8 @@ export class ChatController {
             return;
         }
         try {
-            const runIds = await this._groupManager.sendGroupMessage(content, this._planMode);
-            const agentIds = Array.from(runIds.keys());
+            // Returns ordered list of all target agentIds (chain order)
+            const agentIds = await this._groupManager.sendGroupMessage(content, this._planMode);
             this._webview?.postMessage({ type: 'waitingGroupReply', agentIds });
         } catch (err: any) {
             this._webview?.postMessage({

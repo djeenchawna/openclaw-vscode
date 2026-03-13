@@ -171,8 +171,13 @@ export class GroupChatManager {
                 // Small delay to let the Gateway persist the final message before
                 // we query chat.history — avoids a race where history is fetched
                 // before the assistant turn is written.
+                const agentId = matchedAgent.agentId;
                 setTimeout(() => {
-                    this._fetchLatestAgentMessage(matchedAgent!);
+                    // Guard: agent may have been removed (leaveGroup) during the delay
+                    const stillActive = this._agents.get(agentId);
+                    if (stillActive && this._gateway) {
+                        this._fetchLatestAgentMessage(stillActive);
+                    }
                 }, 150);
             } else if (state === 'error' || state === 'aborted') {
                 if (eventRunId) {
@@ -565,6 +570,10 @@ export class GroupChatManager {
                 timestamp: Date.now(),
             };
             this._messages.push(msg);
+            // Trim message history to prevent unbounded memory growth
+            if (this._messages.length > 200) {
+                this._messages = this._messages.slice(-200);
+            }
             this._notifyMessage(msg);
 
             // ── Chain mode: continue to next queued agent ─────────────────────

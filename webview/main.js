@@ -2559,7 +2559,7 @@ Try:
                         respondedAgentHistory = [
                             message.agentId,
                             ...respondedAgentHistory.filter(id => id !== message.agentId)
-                        ];
+                        ].slice(0, 20); // cap at 20 entries
                     }
                     groupWaitingIds.delete(message.agentId);
                     if (groupWaitingIds.size === 0) {

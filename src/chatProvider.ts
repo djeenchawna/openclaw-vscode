@@ -136,6 +136,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
      * - Refreshes agent identity
      */
     public async changeAgent(newAgentId: string): Promise<void> {
+        // 0. Dispose old controller (removes gateway event handlers, group callbacks,
+        //    config listeners) to prevent resource leaks and stale event routing.
+        this._controller.dispose();
+
+        // 0b. Leave group chat so stale group agents don't persist across agent switches
+        const { GroupChatManager } = await import('./groupChatManager');
+        const groupManager = GroupChatManager.getInstance();
+        if (groupManager.isGroupMode()) {
+            groupManager.leaveGroup();
+        }
+
         // 1. Delete old session
         this._gateway.deleteSession(this._controller.sessionKey).catch(() => {});
         this._controller.sessionManager.resetSession(this._controller.sessionKey);
