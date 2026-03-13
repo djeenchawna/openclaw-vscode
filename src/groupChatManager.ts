@@ -757,11 +757,19 @@ export class GroupChatManager {
 
         agent.modelOverride = model;
 
-        // Apply to agent's session via gateway.setSessionModel (proper /model command)
+        // Apply to agent's session via /model command (fire-and-forget).
+        // IMPORTANT: Do NOT use gateway.setSessionModel() here — it uses
+        // _wsClient.sendMessage() which registers a blocking chat event listener
+        // that matches by sessionKey only (no runId check). This can consume
+        // or race with actual user-triggered chat events for the same session.
+        // sendMessageFireAndForget uses sendRpc('chat.send') which is non-blocking.
         if (this._gateway) {
             try {
                 const effectiveModel = model ?? this._globalModel ?? 'default';
-                await this._gateway.setSessionModel(agent.sessionKey, effectiveModel);
+                const modelCmd = effectiveModel && effectiveModel !== 'default'
+                    ? `/model ${effectiveModel}`
+                    : '/model default';
+                this._gateway.sendMessageFireAndForget(agent.sessionKey, modelCmd);
             } catch (err) {
                 console.warn(`[GroupChat] setAgentModel failed for ${agentId}:`, err);
             }
