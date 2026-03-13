@@ -153,6 +153,7 @@
     let respondedAgentHistory = []; // ordered stack of agentIds that have replied (newest first), for auto-@mention fallback
     let mentionPickerIndex = 0;  // selected index in mention picker
     let mentionJustSelected = false; // หลังเลือกจาก picker แล้ว กด Enter จะส่งเลย
+    let renderedGroupMessages = new Map(); // agentId → Set of content hashes (for dedup)
     let attachments = []; // { type: 'file'|'image'|'reference', name, path?, data? }
     let messageQueue = []; // 消息队列: { id, text, attachments, createdAt }
     let queueIdCounter = 0; // 队列 ID 计数器
@@ -478,6 +479,28 @@
         // 记录添加前是否在底部
         const wasAtBottom = isScrolledToBottom();
 
+        // Deduplicate: skip if last message is identical
+        // (prevents double-render from loadHistory + sendMessageNow flow)
+        const lastMsgEl = messages.lastElementChild;
+        if (lastMsgEl && lastMsgEl.className.includes(`message ${role}`)) {
+            let lastContent = '';
+            if (role === 'assistant') {
+                // Extract text content only (skip avatar/thinking)
+                const contentDiv = lastMsgEl.querySelector('.message-text') || lastMsgEl;
+                lastContent = (contentDiv.textContent || '').trim();
+            } else if (role === 'user') {
+                const textDiv = lastMsgEl.querySelector('.message-text');
+                lastContent = (textDiv?.textContent || lastMsgEl.textContent || '').trim();
+            } else {
+                lastContent = (lastMsgEl.textContent || '').trim();
+            }
+            const newContent = (content || '').trim();
+            if (lastContent && newContent && lastContent === newContent) {
+                console.log(`[Deduplicate] Skipping duplicate ${role} message`);
+                return; // Skip rendering duplicate
+            }
+        }
+
         const div = document.createElement('div');
         div.className = `message ${role}`;
 
@@ -583,6 +606,19 @@
             removeAgentThinking(msg.agentId);
             return;
         }
+
+        // Deduplicate: skip if this exact message was already rendered
+        const contentHash = `${(msg.content || '').substring(0, 100)}`;
+        if (!renderedGroupMessages.has(msg.agentId)) {
+            renderedGroupMessages.set(msg.agentId, new Set());
+        }
+        const agentHashes = renderedGroupMessages.get(msg.agentId);
+        if (agentHashes.has(contentHash)) {
+            console.log(`[Group] Skipping duplicate message from ${msg.agentId}`);
+            removeAgentThinking(msg.agentId);
+            return;
+        }
+        agentHashes.add(contentHash);
 
         removeAgentThinking(msg.agentId);
 
@@ -712,6 +748,7 @@
             groupMemberBar.style.display = 'none';
             messageInput.placeholder = i18n.sendPlaceholder || 'Ask a question...';
             respondedAgentHistory = []; // reset when leaving group
+            renderedGroupMessages.clear(); // clear dedup cache
             updateGroupToggleBtn();
             return;
         }
@@ -2566,8 +2603,9 @@ Try:
             case 'loadHistory':
                 if (message.messages && message.messages.length > 0) {
                     // 计算内容指纹，跳过无变化的重建（避免自动刷新闪烁）
+                    // Use content substring (first 100 chars) for more reliable change detection
                     const hash = message.messages.map(m =>
-                        `${m.role}:${(m.content || '').length}:${(m.toolCalls || []).length}:${(m.thinking || '').length}`
+                        `${m.role}:${(m.content || '').substring(0, 100)}:${(m.toolCalls || []).length}:${(m.thinking || '').length}`
                     ).join('|');
                     if (hash === lastHistoryHash) {
                         // 内容没变，跳过重建
@@ -2719,6 +2757,8 @@ Try:
                     messageInput.placeholder = i18n.sendPlaceholder || 'Ask a question...';
                     isSending = false;
                     updateSendButtonState();
+                    // Clear group dedup cache when leaving group mode
+                    renderedGroupMessages.clear();
                 }
                 break;
 
