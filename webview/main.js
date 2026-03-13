@@ -242,7 +242,6 @@
     // Group chat DOM
     const groupMemberBar = document.getElementById('groupMemberBar');
     const groupMembersEl = document.getElementById('groupMembers');
-    const groupLeaveBtn = document.getElementById('groupLeaveBtn');
     const groupToggleBtn = document.getElementById('groupToggleBtn');
     const mentionPickerEl = document.getElementById('mentionPicker');
     const mentionPickerList = document.getElementById('mentionPickerList');
@@ -750,12 +749,14 @@
             respondedAgentHistory = []; // reset when leaving group
             renderedGroupMessages.clear(); // clear dedup cache
             modelDropdown.style.display = '';  // show model dropdown in normal mode
+            refreshBtn.style.display = '';     // show refresh button in normal mode
             updateGroupToggleBtn();
             return;
         }
 
-        // Hide main model dropdown in group mode — per-agent models are set via badge context menu
+        // Hide main model dropdown and refresh button in group mode
         modelDropdown.style.display = 'none';
+        refreshBtn.style.display = 'none';
         groupMemberBar.style.display = 'flex';
         groupMembersEl.innerHTML = '';
 
@@ -942,15 +943,7 @@
         });
     }
 
-    // Leave group button inside member bar
-    if (groupLeaveBtn) {
-        groupLeaveBtn.addEventListener('click', () => {
-            vscode.postMessage({ type: 'leaveGroupChat' });
-        });
-    }
-
     // Group toggle button in header — always means "add agent to group"
-    // Leaving group is done via the ✕ button inside the member bar
     function updateGroupToggleBtn() {
         if (!groupToggleBtn) return;
         const use = groupToggleBtn.querySelector('use');
