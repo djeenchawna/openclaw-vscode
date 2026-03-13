@@ -257,11 +257,26 @@ export class GroupChatManager {
 
         this._notifyState();
 
-        // Broadcast updated system prompt to all agents (including the new one).
-        // Fire-and-forget intentionally: we do NOT track these runIds in _pendingRunIds,
-        // so the strict runId guard in _setupChatEventListener will silently drop any
-        // chat events triggered by system-prompt responses (e.g. NO_REPLY).
-        this._broadcastSystemPrompt().catch(() => {});
+        // Send system prompt to the NEW agent using sendChat (awaited) to ensure
+        // the gateway creates the session before any subsequent commands (/model).
+        // Other existing agents get fire-and-forget updates (session already exists).
+        if (this._gateway) {
+            const prompt = this._buildAgentSystemPrompt(member);
+            const initRunId = `init-${agentId}-${Date.now()}`;
+            try {
+                await this._gateway.sendChat(member.sessionKey, prompt, initRunId);
+            } catch (err) {
+                console.warn(`[GroupChat] Failed to init session for ${agentId}:`, err);
+            }
+
+            // Update other existing agents with new member list (fire-and-forget)
+            for (const agent of this._agents.values()) {
+                if (agent.agentId !== agentId) {
+                    const updatePrompt = this._buildAgentSystemPrompt(agent);
+                    this._gateway.sendMessageFireAndForget(agent.sessionKey, updatePrompt);
+                }
+            }
+        }
 
         return member;
     }
