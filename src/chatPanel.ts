@@ -80,7 +80,7 @@ export class ChatPanel {
 
         const panel = vscode.window.createWebviewPanel(
             ChatPanel.viewType,
-            '🦞',
+            '🦞 OpenClaw',
             column,
             {
                 enableScripts: true,
