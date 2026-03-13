@@ -198,7 +198,7 @@
         },
         "openclaw.planMode": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Enable Plan Mode by default"
         },
         "openclaw.gatewayToken": {
