@@ -66,7 +66,7 @@ If you encounter "Cannot find openclaw" error:
    ```
 
 2. Configure in VS Code Settings (`Ctrl+,`):
-   - Search for "OpenClaw: Openclaw Path"
+   - Search for "OpenClaw: OpenClaw Path"
    - Enter the path, e.g.:
      - npm: `C:\Users\YourName\AppData\Roaming\npm\openclaw.cmd`
      - scoop: `C:\Users\YourName\scoop\shims\openclaw.cmd`
@@ -340,7 +340,7 @@ VS Code 的 AI 编程助手，由 OpenClaw 驱动。
    ```
 
 2. 在 VS Code 设置中配置 (`Ctrl+,`)：
-   - 搜索 "OpenClaw: Openclaw Path"
+   - 搜索 "OpenClaw: OpenClaw Path"
    - 输入路径，例如：
      - npm: `C:\Users\YourName\AppData\Roaming\npm\openclaw.cmd`
      - scoop: `C:\Users\YourName\scoop\shims\openclaw.cmd`

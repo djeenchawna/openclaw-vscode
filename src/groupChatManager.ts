@@ -76,6 +76,9 @@ export class GroupChatManager {
     private _messages: GroupMessage[] = [];
     private _colorIndex: number = 0;
 
+    // Context setup message (language + working directory)
+    private _contextSetupMessage: string = '';
+
     // runId → agentId mapping for in-flight requests
     private _pendingRunIds: Map<string, string> = new Map();
 
@@ -241,6 +244,16 @@ export class GroupChatManager {
         this._gateway.onChatEvent(handler);
     }
 
+    // ── Context Setup ─────────────────────────────────────────────────────
+
+    /**
+     * Set the context setup message (language + working directory).
+     * This will be sent to all agents when they join or when system prompt is broadcast.
+     */
+    public setContextSetupMessage(message: string): void {
+        this._contextSetupMessage = message;
+    }
+
     // ── Agent Management ──────────────────────────────────────────────────────
 
     public async addAgent(agentId: string): Promise<AgentMember> {
@@ -283,6 +296,11 @@ export class GroupChatManager {
                 await this._gateway.sendChat(member.sessionKey, prompt, initKey);
             } catch {
                 // sendChat is fire-and-forget RPC — errors are unlikely but non-fatal
+            }
+
+            // Send context setup (language + working directory) to the new agent
+            if (this._contextSetupMessage) {
+                this._gateway.sendMessageFireAndForget(member.sessionKey, this._contextSetupMessage);
             }
 
             // Update other existing agents with new member list (fire-and-forget)
@@ -356,6 +374,10 @@ export class GroupChatManager {
         for (const agent of members) {
             const prompt = this._buildAgentSystemPrompt(agent);
             this._gateway?.sendMessageFireAndForget(agent.sessionKey, prompt);
+            // Also re-send context setup (language + working directory)
+            if (this._contextSetupMessage) {
+                this._gateway?.sendMessageFireAndForget(agent.sessionKey, this._contextSetupMessage);
+            }
         }
     }
 
@@ -904,14 +926,28 @@ export class GroupChatManager {
                 }
 
                 const content = this._extractContent(lastAssistant);
-                if (!content || isSentinelMessage(content)) {
+                const toolCalls = this._extractToolCalls(lastAssistant);
+
+                // If no content AND no tool calls, continue polling
+                // (handles case where agent is still thinking or only sent tool results)
+                if (!content && toolCalls.length === 0) {
+                    setTimeout(poll, intervalMs);
+                    return;
+                }
+
+                // Filter sentinel messages — do not route but still show
+                if (isSentinelMessage(content)) {
                     setTimeout(poll, intervalMs);
                     return;
                 }
 
                 // Check if this response is already displayed
+                // Compare content AND toolCalls to avoid duplicates
                 const alreadyShown = this._messages.some(
-                    m => m.role === 'agent' && m.agentId === agent.agentId && m.content === content
+                    m => m.role === 'agent' 
+                        && m.agentId === agent.agentId 
+                        && m.content === content
+                        && (m.toolCalls?.length ?? 0) === toolCalls.length
                 );
                 if (alreadyShown) {
                     setTimeout(poll, intervalMs);
@@ -919,7 +955,7 @@ export class GroupChatManager {
                 }
 
                 // Found new response — process it as if event arrived
-                console.log(`[GroupChat] Fallback poll found response from ${agent.agentId}`);
+                console.log(`[GroupChat] Fallback poll found response from ${agent.agentId} (content: ${content?.substring(0, 50) || '(none)'}, toolCalls: ${toolCalls.length})`);
                 this._pendingRunIds.delete(runId);
                 this._fetchLatestAgentMessage(agent);
             }).catch(() => {

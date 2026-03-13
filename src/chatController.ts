@@ -481,6 +481,11 @@ export class ChatController {
         if (this._gateway.isConnected() && !this._sessionManager.hasSentContextSetup(this._sessionKey)) {
             try {
                 await this._sessionManager.sendContextSetup(this._gateway, this._sessionKey);
+                // Also set for group chat agents
+                const contextMsg = this._sessionManager.buildContextSetupMessage();
+                if (contextMsg) {
+                    this._groupManager.setContextSetupMessage(contextMsg);
+                }
             } catch (err) {
                 console.warn('上下文设置发送失败:', err);
             }
@@ -502,6 +507,11 @@ export class ChatController {
 
             // Resend context setup (language + workspace)
             await this._sessionManager.sendContextSetup(this._gateway, this._sessionKey);
+            // Also update for group chat agents
+            const contextMsg = this._sessionManager.buildContextSetupMessage();
+            if (contextMsg) {
+                this._groupManager.setContextSetupMessage(contextMsg);
+            }
         } catch (err: any) {
             vscode.window.showErrorMessage(`Model switch failed: ${err.message || err}`);
         }
@@ -514,6 +524,16 @@ export class ChatController {
         if (!this._gateway.isConnected() || this._isSending) return;
         try {
             await this._sessionManager.sendContextSetup(this._gateway, this._sessionKey);
+            // Also update for group chat agents
+            const contextMsg = this._sessionManager.buildContextSetupMessage();
+            if (contextMsg) {
+                this._groupManager.setContextSetupMessage(contextMsg);
+                // Broadcast to all current group members
+                if (this._groupManager.isGroupMode()) {
+                    // Trigger broadcast via leaveGroup + re-add, or just call the method directly
+                    // For now, we'll just set the message and it will be used for next broadcast
+                }
+            }
         } catch (err) {
             console.warn('上下文设置重发失败:', err);
         }
@@ -1057,6 +1077,47 @@ export class ChatController {
                 context: 'group_send',
             });
         }
+    }
+
+    /**
+     * Restore webview state when sidebar becomes visible again.
+     * Sends current group state, plan mode, and other UI state to rebuild the UI.
+     */
+    public restoreWebviewState() {
+        if (!this._webview) return;
+
+        // Restore locale
+        this._webview.postMessage({
+            type: 'setLocale',
+            locale: LanguageManager.getInstance().getAIOutputLanguage()
+        });
+
+        // Restore group state (always send to ensure UI state is correct)
+        const agents = this._groupManager.getAgents();
+        this._webview.postMessage({
+            type: 'groupStateUpdate',
+            agents: agents.map(a => ({
+                agentId: a.agentId,
+                name: a.name,
+                color: a.color,
+                modelOverride: a.modelOverride
+            }))
+        });
+
+        // Restore loop mode state
+        this._webview.postMessage({
+            type: 'loopModeToggled',
+            enabled: this._groupManager.isLoopModeEnabled()
+        });
+
+        // Restore plan mode state
+        this._webview.postMessage({
+            type: 'updatePlanMode',
+            enabled: this._planMode
+        });
+
+        // Refresh models to get current selection
+        this._sendModels();
     }
 
     public dispose() {

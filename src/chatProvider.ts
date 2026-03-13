@@ -61,6 +61,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (data) => {
             await this._controller.handleMessage(data);
         });
+
+        // Handle visibility changes - restore state when sidebar becomes visible
+        webviewView.onDidChangeVisibility(() => {
+            if (webviewView.visible) {
+                // Sidebar became visible - restore state
+                this._controller.restoreWebviewState();
+            }
+        });
     }
 
     private _getHtmlContent(webview: vscode.Webview): string {

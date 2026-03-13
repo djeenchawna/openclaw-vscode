@@ -42,7 +42,7 @@ export class GatewayClient {
     constructor(baseUrl: string, customPath?: string) {
         this._baseUrl = baseUrl;
         // 尝试常见的 openclaw 路径
-        this._openclawPath = this._findOpenclawPath(customPath);
+        this._openclawPath = this._findOpenClawPath(customPath);
         // 读取 Gateway auth token
         this._gatewayToken = this._readGatewayToken();
     }
@@ -107,7 +107,7 @@ export class GatewayClient {
         return vscode.workspace.getConfiguration('openclaw').get('enableCliFallback', false);
     }
 
-    private _findOpenclawPath(customPath?: string): string {
+    private _findOpenClawPath(customPath?: string): string {
         // 优先使用用户自定义路径
         if (customPath && fs.existsSync(customPath)) {
             return customPath;
@@ -275,7 +275,7 @@ export class GatewayClient {
         
         // CLI 模式：检查可用性
         try {
-            await this._checkOpenclawAvailable();
+            await this._checkOpenClawAvailable();
             this._connected = true;
             this._connectedUrl = this._baseUrl;
             this._lastError = '';
@@ -750,7 +750,7 @@ export class GatewayClient {
         });
     }
 
-    private async _checkOpenclawAvailable(): Promise<void> {
+    private async _checkOpenClawAvailable(): Promise<void> {
         return new Promise((resolve, reject) => {
             const spawnCmd = this._getSpawnCommand(['--version']);
             const proc = spawn(spawnCmd.cmd, spawnCmd.args, {

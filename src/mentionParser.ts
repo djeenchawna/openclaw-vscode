@@ -36,8 +36,8 @@ export function parseMentions(text: string, agents: Array<{ agentId: string; nam
 
 /**
  * Parse agent mentions from plain text (no @ prefix required).
- * Matches agent IDs, full names, and first-name-only (case-insensitive, Unicode-aware).
- * Uses substring/partial matching for flexible detection.
+ * Matches agent IDs, full names, first names, and last names (case-insensitive, Unicode-aware).
+ * Uses word-boundary matching for flexible detection.
  * Returns deduplicated list of agent IDs sorted by match position (order they appear in text).
  * Excludes the specified agentId (typically the speaker).
  * 
@@ -46,6 +46,12 @@ export function parseMentions(text: string, agents: Array<{ agentId: string; nam
  *   agents: [{id: "main", name: "Sebas Tian"}, {id: "alice", name: "Alice"}]
  *   excludeAgentId: "bob"
  *   result: ["main", "alice"] (in order of appearance)
+ * 
+ * Rules:
+ *   - Full name: "Sebas Tian" ✓ detected
+ *   - First name: "Sebas" ✓ detected (matches first word of name)
+ *   - Last name: "Tian" ✓ detected (matches last word of name)
+ *   - Partial: "Seb" ✗ NOT detected, "Ti" ✗ NOT detected
  */
 export function parseLoopMentions(
     text: string,
@@ -53,7 +59,7 @@ export function parseLoopMentions(
     excludeAgentId?: string
 ): string[] {
     const textLower = text.toLowerCase();
-    const matches: Array<{ agentId: string; position: number }> = [];
+    const matches: Array<{ agentId: string; position: number; priority: number }> = [];
 
     for (const agent of agents) {
         // Skip self
@@ -63,23 +69,26 @@ export function parseLoopMentions(
 
         const nameLower = agent.name.toLowerCase();
         const idLower = agent.agentId.toLowerCase();
+        const nameParts = nameLower.split(/\s+/); // Split by whitespace
 
-        // Candidate strings to search for (in priority order: agentId, full name, first name)
+        // Candidate strings to search for (in priority order)
+        // Priority: agentId (1) > full name (2) > first name (3) > last name (4)
         const candidates = [
             { text: idLower, priority: 1 },
             { text: nameLower, priority: 2 },
-            { text: nameLower.split(/\s+/)[0], priority: 3 }, // first word only
+            { text: nameParts[0], priority: 3 }, // first name
+            { text: nameParts[nameParts.length - 1], priority: 4 }, // last name
         ];
 
         let bestMatch = -1;
+        let bestPriority = 999;
 
         for (const candidate of candidates) {
             if (!candidate.text || candidate.text.length === 0) {
                 continue;
             }
 
-            // Use case-insensitive substring search
-            // Only match if it's a word boundary (not in the middle of another word)
+            // Try to find exact word-boundary match in text
             const pos = textLower.indexOf(candidate.text);
             if (pos >= 0) {
                 // Check word boundaries: before & after should be space or punctuation, not alphanumeric
@@ -92,8 +101,9 @@ export function parseLoopMentions(
                 const isWordBoundaryAfter = /[\s\u0E00-\u0E7F!,.;:?()[\]{}—\-—–]/.test(charAfter) || pos + candidate.text.length === textLower.length;
 
                 if (isWordBoundaryBefore && isWordBoundaryAfter) {
-                    if (bestMatch === -1 || pos < bestMatch) {
+                    if (bestMatch === -1 || pos < bestMatch || (pos === bestMatch && candidate.priority < bestPriority)) {
                         bestMatch = pos;
+                        bestPriority = candidate.priority;
                     }
                 }
             }
@@ -101,12 +111,15 @@ export function parseLoopMentions(
 
         // If found any match for this agent, record position
         if (bestMatch >= 0) {
-            matches.push({ agentId: agent.agentId, position: bestMatch });
+            matches.push({ agentId: agent.agentId, position: bestMatch, priority: bestPriority });
         }
     }
 
-    // Sort by position (order of appearance) and return deduplicated agentIds
-    matches.sort((a, b) => a.position - b.position);
+    // Sort by position (order of appearance), then by priority
+    matches.sort((a, b) => {
+        if (a.position !== b.position) return a.position - b.position;
+        return a.priority - b.priority;
+    });
     return matches.map(m => m.agentId);
 }
 

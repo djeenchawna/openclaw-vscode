@@ -61,7 +61,7 @@
         loopMode: 'Loop Mode',
         loopModeOn: '🔴 Loop Mode ON — agents auto-route via name mentions',
         loopModeOff: '🟢 Loop Mode OFF',
-        autoLoop: '🔄 auto'
+        autoLoop: '🤖 Auto'
     };
 
     // Load locale
@@ -122,7 +122,7 @@
                 loopMode: '循环模式',
                 loopModeOn: '🔴 循环模式开启 — 助手通过名称提及自动路由',
                 loopModeOff: '🟢 循环模式关闭',
-                autoLoop: '🔄 自动'
+                autoLoop: '🤖 自动'
             };
         }
         applyI18n();
@@ -796,15 +796,10 @@
 
             const color = escapeHtml(agent.color || '#888');
             const name = escapeHtml(agent.name || agent.agentId);
-            // Model chip (only when overridden)
-            const modelChip = agent.modelOverride
-                ? `<span class="agent-model-chip" title="Model: ${escapeAttr(agent.modelOverride)}">⚡${escapeHtml(shortModelName(agent.modelOverride))}</span>`
-                : '';
 
             badge.innerHTML = `
                 <span class="group-member-dot" style="background:${color}"></span>
-                <span class="group-member-name">${name}</span>
-                ${modelChip}
+                <span class="group-member-name" style="color:${color}">${name}</span>
                 <span class="group-member-remove" data-agent-id="${escapeAttr(agent.agentId)}" title="Remove">×</span>
             `;
             groupMembersEl.appendChild(badge);
@@ -1697,7 +1692,7 @@ Install it with:
 npm install -g openclaw
 
 Or configure the openclaw path in VSCode settings:
-Settings → OpenClaw → Openclaw Path`
+Settings → OpenClaw → OpenClaw Path`
             };
         }
 
@@ -2888,17 +2883,11 @@ Try:
                 break;
 
             case 'autoLoopMessage':
-                // Display auto-generated loop message as a user bubble with "🔄 auto" tag
+                // Auto-loop triggered — do NOT display user bubble (system already routing).
+                // Just update UI state for thinking indicators.
                 {
                     const autoContent = message.content || '';
                     if (autoContent) {
-                        const div = document.createElement('div');
-                        div.className = 'message user';
-                        div.innerHTML = `<div class="auto-loop-tag">${escapeHtml(i18n.autoLoop || '🔄 auto')}</div>`
-                            + `<div class="message-content">${renderMarkdown(autoContent)}</div>`;
-                        messages.appendChild(div);
-                        scrollToBottom();
-
                         // Show thinking indicator immediately for mentioned agents
                         const mentionedAgents = groupAgents.filter(a =>
                             autoContent.includes('@' + (a.name || a.agentId)) ||

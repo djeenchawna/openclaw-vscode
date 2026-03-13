@@ -89,14 +89,6 @@
         "title": "%command.showConnectionStatus.title%"
       },
       {
-        "command": "openclaw.closeChat",
-        "title": "%command.closeChat.title%",
-        "icon": {
-          "light": "media/close-light.svg",
-          "dark": "media/close-dark.svg"
-        }
-      },
-      {
         "command": "openclaw.selectAgent",
         "title": "%command.selectAgent.title%"
       },
@@ -129,11 +121,6 @@
       "view/title": [
         {
           "command": "openclaw.toggleGroupMode",
-          "when": "view == openclaw.chatView",
-          "group": "navigation"
-        },
-        {
-          "command": "openclaw.closeChat",
           "when": "view == openclaw.chatView",
           "group": "navigation"
         }

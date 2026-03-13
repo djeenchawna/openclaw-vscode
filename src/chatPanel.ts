@@ -139,6 +139,13 @@ export class ChatPanel {
             null,
             this._disposables
         );
+
+        // Handle visibility changes - restore state when panel becomes visible again
+        this._panel.onDidChangeViewState(() => {
+            if (this._panel.visible) {
+                this._controller.restoreWebviewState();
+            }
+        });
     }
 
     private _getHtmlContent(): string {
