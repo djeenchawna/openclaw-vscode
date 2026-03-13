@@ -89,7 +89,7 @@ export interface WebviewAdapter {
  * 供 ChatProvider（侧边栏）和 ChatPanel（独立面板）共同使用
  */
 export class ChatController {
-    private _planMode: boolean = false;
+    private _planMode: boolean = true;
     private _isSending: boolean = false;       // chat.send RPC 正在发送
     private _chatRunId: string | null = null;   // 当前运行的 runId，非 null = 等待 AI 回复
     private _chatEventHandler: ((payload: any) => void) | null = null;
@@ -110,7 +110,7 @@ export class ChatController {
         private _sessionKey: string
     ) {
         const config = vscode.workspace.getConfiguration('openclaw');
-        this._planMode = config.get<boolean>('planMode') || false;
+        this._planMode = config.get<boolean>('planMode') !== false;  // default to true (plan mode)
 
         // Initialize group chat manager singleton.
         // Extract a stable windowId from the VSCode session — NOT from the sessionKey,

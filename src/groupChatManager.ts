@@ -145,9 +145,12 @@ export class GroupChatManager {
             console.log(`[GroupChat] Chat event: sessionKey=${eventSessionKey} runId=${eventRunId} state=${state}`);
 
             // Find which agent this event belongs to.
-            // Match by suffix (strip "agent:{agentId}:" prefix) because Gateway may
-            // return the sessionKey with a different prefix format than what we stored.
-            // Use suffix matching (like chatController does) instead of exact match.
+            // Match agent by sessionKey.
+            // Try exact match first, then try checking if event key contains
+            // the agentId-specific portion (e.g. "agent:alice:" prefix).
+            // NOTE: All group agents share the same suffix (vscode-group-{windowId}),
+            // so suffix-only matching would always hit the first agent in the Map.
+            // We must include the agentId in the match.
             let matchedAgent: AgentMember | undefined;
             for (const agent of this._agents.values()) {
                 if (eventSessionKey === agent.sessionKey) {
@@ -155,8 +158,11 @@ export class GroupChatManager {
                     matchedAgent = agent;
                     break;
                 }
-                // Suffix match: extract the suffix part (after "agent:{id}:")
-                const suffix = agent.sessionKey.replace(/^agent:[^:]+:/, '');
+                // Check if event key contains the agent-specific prefix + suffix
+                // e.g. stored: "agent:alice:vscode-group-xxx"
+                //       event:  "agent:alice:vscode-group-xxx" (exact) or contains "alice:vscode-group-xxx"
+                const agentPrefix = `${agent.agentId}:`;
+                const suffix = agent.sessionKey.replace(/^agent:/, '');  // "alice:vscode-group-xxx"
                 if (suffix && eventSessionKey.includes(suffix)) {
                     matchedAgent = agent;
                     break;
