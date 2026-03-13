@@ -654,23 +654,11 @@
         html += `<span class="group-agent-name" style="color:${color}">${name}</span>`;
         html += `</div>`;
         
-        // Render tool calls first (if any)
+        // Render tool calls first (if any) — reuse renderToolCard() for consistent display
         if (msg.toolCalls && msg.toolCalls.length > 0) {
             html += '<div class="tool-cards-row">';
             for (const tc of msg.toolCalls) {
-                const meta = getToolMeta(tc.name);
-                const argsJson = JSON.stringify(tc.args || {});
-                const detail = meta.detail || '';
-                const hasArgs = Object.keys(tc.args || {}).length > 0;
-                html += `<div class="tool-card">
-                    <div class="tool-card-header">
-                        <span class="tool-card-icon">${meta.icon}</span>
-                        <span class="tool-card-label">${escapeHtml(meta.label)}</span>
-                        <span class="tool-card-check">✓</span>
-                    </div>
-                    ${detail ? `<div class="tool-card-detail">${escapeHtml(detail)}</div>` : ''}
-                    ${hasArgs ? `<button class="tool-card-expand" data-name="${escapeAttr(meta.label)}" data-args="${argsJson}">{...}</button>` : ''}
-                </div>`;
+                html += renderToolCard(tc.name, tc.args);
             }
             html += '</div>';
         }
@@ -1919,6 +1907,24 @@ Try:
 
             isSending = true;
             updateSendButtonState();
+
+            // Show thinking indicator immediately for mentioned agents (don't wait for round-trip)
+            {
+                const mentionedAgents = groupAgents.filter(a =>
+                    fullMessage.includes('@' + (a.name || a.agentId)) ||
+                    fullMessage.includes('@' + a.agentId)
+                );
+                if (mentionedAgents.length > 0) {
+                    // First agent → thinking dots, rest → queued
+                    showAgentThinking(mentionedAgents[0].agentId);
+                    groupWaitingIds = new Set(mentionedAgents.map(a => a.agentId));
+                    groupQueuedIds = mentionedAgents.slice(1).map(a => a.agentId);
+                    for (const qId of groupQueuedIds) {
+                        showAgentQueued(qId);
+                    }
+                }
+            }
+
             vscode.postMessage({ type: 'sendGroupMessage', content: fullMessage, planMode: planMode });
             return;
         }
@@ -2892,6 +2898,22 @@ Try:
                             + `<div class="message-content">${renderMarkdown(autoContent)}</div>`;
                         messages.appendChild(div);
                         scrollToBottom();
+
+                        // Show thinking indicator immediately for mentioned agents
+                        const mentionedAgents = groupAgents.filter(a =>
+                            autoContent.includes('@' + (a.name || a.agentId)) ||
+                            autoContent.includes('@' + a.agentId)
+                        );
+                        if (mentionedAgents.length > 0) {
+                            showAgentThinking(mentionedAgents[0].agentId);
+                            groupWaitingIds = new Set(mentionedAgents.map(a => a.agentId));
+                            groupQueuedIds = mentionedAgents.slice(1).map(a => a.agentId);
+                            for (const qId of groupQueuedIds) {
+                                showAgentQueued(qId);
+                            }
+                            isSending = true;
+                            updateSendButtonState();
+                        }
                     }
                 }
                 break;

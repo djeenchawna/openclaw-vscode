@@ -667,9 +667,10 @@ export class GroupChatManager {
             }
 
             const content = this._extractContent(lastAssistant);
+            const toolCalls = this._extractToolCalls(lastAssistant);
 
-            if (!content) {
-                // History returned but content is empty — retry once
+            if (!content && toolCalls.length === 0) {
+                // History returned but no content and no tool calls — retry once
                 if (retryCount === 0) {
                     this._responseCountThisRound--;
                     setTimeout(() => this._fetchLatestAgentMessage(agent, 1), 300);
@@ -683,7 +684,9 @@ export class GroupChatManager {
             }
 
             // Track full agent response for future retrieval
-            this._lastAgentResponse.set(agent.agentId, content);
+            if (content) {
+                this._lastAgentResponse.set(agent.agentId, content);
+            }
 
             // Update delegation counters
             this._agentResponseCount.set(agent.agentId, (this._agentResponseCount.get(agent.agentId) ?? 0) + 1);
@@ -694,15 +697,13 @@ export class GroupChatManager {
             const isDuplicate = lastMessage
                 && lastMessage.role === 'agent'
                 && lastMessage.agentId === agent.agentId
-                && lastMessage.content === content;
+                && lastMessage.content === content
+                && (lastMessage.toolCalls?.length ?? 0) === toolCalls.length;
 
             if (isDuplicate) {
                 console.log(`[GroupChat] Skipping duplicate message from ${agent.agentId}`);
                 return;
             }
-
-            // Extract tool calls from agent response
-            const toolCalls = this._extractToolCalls(lastAssistant);
 
             // Always show agent message in UI
             const msg: GroupMessage = {
