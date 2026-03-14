@@ -2015,22 +2015,9 @@ Try:
             isSending = true;
             updateSendButtonState();
 
-            // Show thinking indicator immediately for mentioned agents (don't wait for round-trip)
-            {
-                const mentionedAgents = groupAgents.filter(a =>
-                    fullMessage.includes('@' + (a.name || a.agentId)) ||
-                    fullMessage.includes('@' + a.agentId)
-                );
-                if (mentionedAgents.length > 0) {
-                    // First agent → thinking dots, rest → queued
-                    showAgentThinking(mentionedAgents[0].agentId);
-                    groupWaitingIds = new Set(mentionedAgents.map(a => a.agentId));
-                    groupQueuedIds = mentionedAgents.slice(1).map(a => a.agentId);
-                    for (const qId of groupQueuedIds) {
-                        showAgentQueued(qId);
-                    }
-                }
-            }
+            // Thinking indicators are created by the `waitingGroupReply` event
+            // from the extension (single source of truth) — no optimistic UI here
+            // to avoid duplicate indicators (was showing 4 instead of 2).
 
             vscode.postMessage({ type: 'sendGroupMessage', content: fullMessage, planMode: planMode });
             return;
