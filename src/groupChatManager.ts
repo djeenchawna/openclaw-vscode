@@ -789,7 +789,8 @@ export class GroupChatManager {
             msg.mentions = mentionedIds;
 
             // Determine if delegation should be routed
-            let shouldRoute = mentionedIds.length > 0;
+            // Only allow delegation when Loop Mode is enabled
+            let shouldRoute = this._loopModeEnabled && mentionedIds.length > 0;
             if (shouldRoute) {
                 // Check loop guards
                 if (this._conversationDepth >= this._maxDelegationDepth) {
