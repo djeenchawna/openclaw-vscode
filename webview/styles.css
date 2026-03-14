@@ -2030,6 +2030,21 @@ body {
     text-transform: uppercase;
 }
 
+/* Profile image avatar (URL) */
+.group-agent-avatar.group-agent-avatar-img {
+    object-fit: cover;
+    background: transparent;
+    font-size: unset;
+    font-weight: unset;
+    text-transform: unset;
+}
+
+/* Emoji/letter avatar with colored background */
+.group-agent-avatar.group-agent-avatar-text {
+    text-transform: none;
+    font-size: 12px;
+}
+
 .group-agent-name {
     font-size: 11px;
     font-weight: 600;

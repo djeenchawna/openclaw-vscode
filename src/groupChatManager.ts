@@ -52,6 +52,7 @@ export interface GroupMessage {
     agentId?: string;
     agentName?: string;
     agentColor?: string;
+    agentAvatar?: string;  // agent profile picture (URL/emoji/letter)
     content: string;
     mentions: string[];    // parsed @mentions
     toolCalls?: Array<{ name: string; args: any }>;  // tool calls from agent response
@@ -233,6 +234,7 @@ export class GroupChatManager {
                     agentId: matchedAgent.agentId,
                     agentName: matchedAgent.name,
                     agentColor: matchedAgent.color,
+                    agentAvatar: matchedAgent.avatar || '',
                     content: '',
                     mentions: [],
                     timestamp: Date.now(),
@@ -740,6 +742,7 @@ export class GroupChatManager {
                 agentId: agent.agentId,
                 agentName: agent.name,
                 agentColor: agent.color,
+                agentAvatar: agent.avatar || '',
                 content,
                 mentions: [],
                 toolCalls: toolCalls.length > 0 ? toolCalls : undefined,

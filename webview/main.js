@@ -665,13 +665,21 @@
         const initial = (msg.agentName || msg.agentId || '?').charAt(0).toUpperCase();
         const color = escapeHtml(msg.agentColor || '#888');
         const name = escapeHtml(msg.agentName || msg.agentId || 'Agent');
+        const avatar = msg.agentAvatar || '';
 
         let html = '';
         if (msg.parentMessageId) {
             html += `<div class="group-delegation-indicator">↳ ${i18n.delegation || 'delegation'}</div>`;
         }
         html += `<div class="group-agent-header">`;
-        html += `<div class="group-agent-avatar" style="background:${color}">${escapeHtml(initial)}</div>`;
+        // Avatar: prefer profile image URL, then emoji/letter, fallback to colored initial
+        if (avatar.startsWith('http://') || avatar.startsWith('https://')) {
+            html += `<img class="group-agent-avatar group-agent-avatar-img" src="${escapeHtml(avatar)}" alt="">`;
+        } else if (avatar) {
+            html += `<div class="group-agent-avatar group-agent-avatar-text" style="background:${color}">${escapeHtml(avatar)}</div>`;
+        } else {
+            html += `<div class="group-agent-avatar" style="background:${color}">${escapeHtml(initial)}</div>`;
+        }
         html += `<span class="group-agent-name" style="color:${color}">${name}</span>`;
         html += `</div>`;
 
