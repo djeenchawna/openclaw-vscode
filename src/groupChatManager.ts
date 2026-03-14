@@ -698,13 +698,39 @@ export class GroupChatManager {
                 return;
             }
 
-            const content = this._extractContent(lastAssistant);
-            const toolCalls = this._extractToolCalls(lastAssistant);
+            let content = this._extractContent(lastAssistant);
+            let toolCalls = this._extractToolCalls(lastAssistant);
 
+            // If we have toolCalls but no content, check if there's a next message with content
+            // (tool result is often in the next message in history)
+            if (!content && toolCalls.length > 0) {
+                const allAssistantMessages = [...history].reverse();
+                const currentIndex = allAssistantMessages.indexOf(lastAssistant);
+                
+                // Look ahead for messages with content (after this one in history)
+                for (let i = currentIndex + 1; i < allAssistantMessages.length; i++) {
+                    const nextMsg = allAssistantMessages[i];
+                    const nextContent = this._extractContent(nextMsg);
+                    const nextToolCalls = this._extractToolCalls(nextMsg);
+                    
+                    // If we find a message with actual text content, use it
+                    if (nextContent && nextContent.trim().length > 0) {
+                        // Merge: keep current toolCalls + new content
+                        if (nextToolCalls.length > 0) {
+                            // Append any additional tool calls
+                            toolCalls = [...toolCalls, ...nextToolCalls];
+                        }
+                        content = nextContent;
+                        break;
+                    }
+                }
+            }
+
+            // If still no content and no toolCalls after looking ahead, retry once
             if (!content && toolCalls.length === 0) {
                 // History returned but no content and no tool calls — retry once
                 if (retryCount === 0) {
-                    this._responseCountThisRound--;
+                    this._responseCountThisRound--; // undo increment — not a real response yet
                     setTimeout(() => this._fetchLatestAgentMessage(agent, 1), 300);
                 }
                 return;
@@ -937,10 +963,34 @@ export class GroupChatManager {
                     return;
                 }
 
-                const content = this._extractContent(lastAssistant);
-                const toolCalls = this._extractToolCalls(lastAssistant);
+                let content = this._extractContent(lastAssistant);
+                let toolCalls = this._extractToolCalls(lastAssistant);
 
-                // If no content AND no tool calls, continue polling
+                // If we have toolCalls but no content, check if there's a next message with content
+                // (tool result is often in the next message in history)
+                if (!content && toolCalls.length > 0) {
+                    const allAssistantMessages = [...history].reverse();
+                    const currentIndex = allAssistantMessages.indexOf(lastAssistant);
+                    
+                    // Look ahead for messages with content (after this one in history)
+                    for (let i = currentIndex + 1; i < allAssistantMessages.length; i++) {
+                        const nextMsg = allAssistantMessages[i];
+                        const nextContent = this._extractContent(nextMsg);
+                        const nextToolCalls = this._extractToolCalls(nextMsg);
+                        
+                        // If we find a message with actual text content, use it
+                        if (nextContent && nextContent.trim().length > 0) {
+                            // Merge: keep current toolCalls + new content
+                            if (nextToolCalls.length > 0) {
+                                toolCalls = [...toolCalls, ...nextToolCalls];
+                            }
+                            content = nextContent;
+                            break;
+                        }
+                    }
+                }
+
+                // If still no content AND no tool calls, continue polling
                 // (handles case where agent is still thinking or only sent tool results)
                 if (!content && toolCalls.length === 0) {
                     setTimeout(poll, intervalMs);
