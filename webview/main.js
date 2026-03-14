@@ -951,7 +951,7 @@
         const spaceLeft = rect.left;
 
         // Determine horizontal position: prefer left alignment, but ensure enough space
-        let left: number;
+        let left;
         if (spaceRight >= menuMinWidth) {
             left = rect.left;
         } else if (spaceLeft >= menuMinWidth) {
@@ -1051,7 +1051,7 @@
         const spaceBottom = window.innerHeight - parentRect.top;
 
         // Determine horizontal position: prefer side with more space, but ensure enough space
-        let subLeft: number;
+        let subLeft;
         const needsRight = spaceRight >= subMinWidth;
         const needsLeft = spaceLeft >= subMinWidth;
 
