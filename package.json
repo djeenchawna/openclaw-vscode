@@ -51,7 +51,7 @@
         {
           "type": "webview",
           "id": "openclaw.chatView",
-          "name": "Chat"
+          "name": "🦞 OpenClaw"
         }
       ]
     },
@@ -89,12 +89,26 @@
         "title": "%command.showConnectionStatus.title%"
       },
       {
-        "command": "openclaw.closeChat",
-        "title": "%command.closeChat.title%",
-        "icon": {
-          "light": "media/close-light.svg",
-          "dark": "media/close-dark.svg"
-        }
+        "command": "openclaw.selectAgent",
+        "title": "%command.selectAgent.title%"
+      },
+      {
+        "command": "openclaw.toggleGroupMode",
+        "title": "Toggle Group Chat Mode",
+        "icon": "$(person-add)"
+      },
+      {
+        "command": "openclaw.addAgentToGroup",
+        "title": "%command.addAgentToGroup.title%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "openclaw.removeAgentFromGroup",
+        "title": "%command.removeAgentFromGroup.title%"
+      },
+      {
+        "command": "openclaw.leaveGroupChat",
+        "title": "%command.leaveGroupChat.title%"
       }
     ],
     "menus": {
@@ -106,7 +120,7 @@
       ],
       "view/title": [
         {
-          "command": "openclaw.closeChat",
+          "command": "openclaw.toggleGroupMode",
           "when": "view == openclaw.chatView",
           "group": "navigation"
         }
@@ -159,7 +173,7 @@
         },
         "openclaw.autoRefreshInterval": {
           "type": "number",
-          "default": 2000,
+          "default": 1000,
           "minimum": 0,
           "description": "%config.autoRefreshInterval.description%",
           "markdownDescription": "%config.autoRefreshInterval.markdownDescription%"
@@ -185,6 +199,40 @@
           "default": "",
           "description": "%config.planModePrompt.description%",
           "editPresentation": "multilineText"
+        },
+        "openclaw.agentId": {
+          "type": "string",
+          "default": "main",
+          "description": "%config.agentId.description%"
+        },
+        "openclaw.groupChat.contextMessages": {
+          "type": "number",
+          "default": 20,
+          "description": "%config.groupChat.contextMessages.description%"
+        },
+        "openclaw.groupChat.broadcastByDefault": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.groupChat.broadcastByDefault.description%"
+        },
+        "openclaw.groupChat.maxDelegationDepth": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum depth of agent-to-agent delegation chain"
+        },
+        "openclaw.groupChat.maxAgentResponsesPerRound": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum times a single agent can respond per user message"
+        },
+        "openclaw.groupChat.enableDelegation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow agents to delegate tasks to each other via @mentions"
         }
       }
     }

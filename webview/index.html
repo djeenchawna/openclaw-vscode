@@ -11,47 +11,70 @@
 </head>
 
 <body>
-    <!-- SVG 图标定义 -->
+    <!-- SVG Icon Definitions -->
     <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
-        <!-- 发送/飞机图标 -->
+        <!-- Send/Airplane icon -->
         <symbol id="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 2L11 13" />
             <path d="M22 2L15 22L11 13L2 9L22 2Z" />
         </symbol>
-        <!-- 停止图标 -->
+        <!-- Stop icon -->
         <symbol id="icon-stop" viewBox="0 0 24 24" fill="currentColor">
             <rect x="6" y="6" width="12" height="12" rx="1" />
         </symbol>
-        <!-- 附件图标 -->
+        <!-- Attachment icon -->
         <symbol id="icon-attach" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path
                 d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
         </symbol>
-        <!-- 刷新图标 -->
+        <!-- Refresh icon -->
         <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M23 4v6h-6" />
             <path d="M1 20v-6h6" />
             <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
         </symbol>
-        <!-- 设置图标 -->
+        <!-- Settings icon -->
         <symbol id="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path
                 d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
         </symbol>
-        <!-- 关闭图标 -->
+        <!-- Close icon -->
         <symbol id="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
         </symbol>
+        <!-- Add agent to group icon -->
+        <symbol id="icon-group-add" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <line x1="19" y1="8" x2="19" y2="14"/>
+            <line x1="22" y1="11" x2="16" y2="11"/>
+        </symbol>
+        <!-- Leave group icon -->
+        <symbol id="icon-group-leave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <line x1="22" y1="11" x2="16" y2="11"/>
+        </symbol>
+        <!-- Loop mode icon (circular arrows) -->
+        <symbol id="icon-loop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="17 1 21 5 17 9"/>
+            <path d="M3 11V9a4 4 0 014-4h14"/>
+            <polyline points="7 23 3 19 7 15"/>
+            <path d="M21 13v2a4 4 0 01-4 4H3"/>
+        </symbol>
     </svg>
 
-    <!-- 顶栏 -->
+    <!-- Header -->
     <div class="header">
         <div class="header-title">
             <span class="header-icon">🦞</span>
@@ -60,46 +83,69 @@
                   title="Gateway disconnected"></span>
         </div>
         <div class="header-actions">
-            <button class="icon-btn" id="refreshBtn" data-i18n-title="refresh">
-                <svg>
+            <button class="icon-btn" id="refreshBtn" data-i18n-title="refresh" aria-label="Refresh">
+                <svg aria-hidden="true">
                     <use href="#icon-refresh" />
                 </svg>
             </button>
-            <button class="icon-btn" id="settingsBtn" data-i18n-title="settings">
-                <svg>
+            <button class="icon-btn group-toggle-btn" id="groupToggleBtn" data-i18n-title="groupToggle" aria-label="Toggle Group Mode">
+                <svg aria-hidden="true">
+                    <use href="#icon-group-add" />
+                </svg>
+            </button>
+            <button class="icon-btn" id="settingsBtn" data-i18n-title="settings" aria-label="Settings">
+                <svg aria-hidden="true">
                     <use href="#icon-settings" />
                 </svg>
             </button>
         </div>
     </div>
 
-    <!-- 消息列表 -->
+    <!-- Agent Group Member Bar (hidden when not in group mode) -->
+    <div class="group-member-bar" id="groupMemberBar" style="display: none;">
+        <div class="group-members" id="groupMembers"></div>
+        <button class="loop-mode-btn" id="loopModeBtn" style="display: none;" 
+                data-i18n-title="loopMode"
+                aria-label="Toggle Loop Mode"
+                title="Toggle Loop Mode (auto-route via agent names)">
+            <svg aria-hidden="true">
+                <use href="#icon-loop" />
+            </svg>
+        </button>
+    </div>
+
+    <!-- Message List -->
     <div class="messages-container" id="messagesContainer">
         <div class="messages" id="messages"></div>
     </div>
 
-    <!-- 输入区 -->
+    <!-- Input Area -->
     <div class="input-area">
-        <!-- 队列容器（在输入框上方） -->
+        <!-- @ Mention Picker (inside input-area for correct absolute positioning) -->
+        <div class="mention-picker" id="mentionPicker" style="display: none;">
+            <div class="mention-picker-list" id="mentionPickerList"></div>
+        </div>
+
+        <!-- Queue Container (above input box) -->
         <div class="chat-queue" id="queueContainer" style="display: none;">
             <div class="chat-queue__title">📋 <span data-i18n="queuedMessages"></span> (<span id="queueCount">0</span>)</div>
             <div class="chat-queue__list" id="queueList"></div>
         </div>
         
-        <!-- 附件预览区 -->
+        <!-- Attachments Preview -->
         <div class="attachments-preview" id="attachmentsPreview"></div>
 
-        <!-- 输入框容器 -->
+        <!-- Input Box Container -->
         <div class="input-box" id="inputBox">
             <textarea id="messageInput" data-i18n-placeholder="sendPlaceholder" rows="1"></textarea>
-            <button class="attach-btn" id="attachBtn" data-i18n-title="attach">
-                <svg>
+            <button class="attach-btn" id="attachBtn" data-i18n-title="attach" aria-label="Attach File">
+                <svg aria-hidden="true">
                     <use href="#icon-attach" />
                 </svg>
             </button>
         </div>
 
-        <!-- 底部工具栏 -->
+        <!-- Bottom Toolbar -->
         <div class="input-toolbar">
             <div class="toolbar-left">
                 <div class="toolbar-dropdown" id="modeDropdown">
@@ -133,24 +179,24 @@
                     </div>
                 </div>
             </div>
-            <button class="send-btn" id="sendBtn" data-i18n-title="send">
-                <svg class="send-icon">
+            <button class="send-btn" id="sendBtn" data-i18n-title="send" aria-label="Send Message">
+                <svg class="send-icon" aria-hidden="true">
                     <use href="#icon-send" />
                 </svg>
-                <svg class="stop-icon">
+                <svg class="stop-icon" aria-hidden="true">
                     <use href="#icon-stop" />
                 </svg>
             </button>
         </div>
     </div>
 
-    <!-- 文件选择弹窗 -->
+    <!-- File Picker Modal -->
     <div class="file-picker-overlay" id="filePickerOverlay">
         <div class="file-picker">
             <div class="file-picker-header">
                 <span data-i18n="attach"></span>
-                <button class="icon-btn" id="closeFilePicker">
-                    <svg>
+                <button class="icon-btn" id="closeFilePicker" aria-label="Close">
+                    <svg aria-hidden="true">
                         <use href="#icon-close" />
                     </svg>
                 </button>
@@ -160,7 +206,7 @@
         </div>
     </div>
 
-    <!-- 命令选择弹窗 -->
+    <!-- Command Picker Modal -->
     <div class="slash-picker-overlay" id="slashPickerOverlay">
         <div class="slash-picker">
             <input type="text" class="slash-picker-search" id="slashPickerSearch"
@@ -169,7 +215,7 @@
         </div>
     </div>
 
-    <!-- 连接状态弹窗 -->
+    <!-- Connection Status Modal -->
     <div class="status-popup-overlay" id="statusPopupOverlay">
         <div class="status-popup" id="statusPopup">
             <div class="status-popup-header" id="statusPopupHeader"></div>
@@ -184,7 +230,7 @@
         <div class="tool-detail-modal">
             <div class="tool-detail-header">
                 <span id="toolDetailTitle"></span>
-                <button class="tool-detail-close" id="toolDetailClose">✕</button>
+                <button class="tool-detail-close" id="toolDetailClose" aria-label="Close">✕</button>
             </div>
             <pre class="tool-detail-body" id="toolDetailBody"></pre>
         </div>

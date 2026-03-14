@@ -44,7 +44,24 @@
         'think.low': 'Low',
         'think.medium': 'Medium',
         'think.high': 'High',
-        'think.xhigh': 'Extra High'
+        'think.xhigh': 'Extra High',
+        addAgent: 'Add agent to group',
+        removeAgent: 'Remove from group',
+        groupChat: 'Group Chat',
+        groupModeHint: 'Use @name to mention a specific agent',
+        leaveGroup: 'Leave group',
+        'ctx.setModel': 'Set Model',
+        'ctx.remove': 'Remove from group',
+        'ctx.modelDefault': 'Use Agent Default',
+        groupLoopWarning: '⚠️ Group loop guard triggered — agents stopped responding. Send a new message to continue.',
+        groupToggle: 'Add agent to group',
+        groupCostWarning: 'Group mode sends your message to all agents — token usage is multiplied',
+        delegation: 'delegation',
+        groupMentionRequired: '⚠️ Please @mention at least one agent to send a message (e.g. @AgentName your request).',
+        loopMode: 'Loop Mode',
+        loopModeOn: '🔴 Loop Mode ON — agents auto-route via name mentions',
+        loopModeOff: '🟢 Loop Mode OFF',
+        autoLoop: '🤖 Auto'
     };
 
     // Load locale
@@ -88,7 +105,24 @@
                 'think.low': '低',
                 'think.medium': '中',
                 'think.high': '高',
-                'think.xhigh': '超高'
+                'think.xhigh': '超高',
+                addAgent: '添加助手到群组',
+                removeAgent: '从群组移除',
+                groupChat: '群组对话',
+                groupModeHint: '使用 @名称 提及特定助手',
+                leaveGroup: '离开群组',
+                'ctx.setModel': '切换模型',
+                'ctx.remove': '从群组移除',
+                'ctx.modelDefault': '使用助手默认模型',
+                groupLoopWarning: '⚠️ 检测到群组循环 — 已停止自动响应。发送新消息继续对话。',
+                groupToggle: '添加助手到群组',
+                groupCostWarning: '群组模式会将消息发送给所有助手，Token 用量成倍增加',
+                delegation: '任务委派',
+                groupMentionRequired: '⚠️ Please @mention at least one agent to send a message (e.g. @AgentName your request).',
+                loopMode: '循环模式',
+                loopModeOn: '🔴 循环模式开启 — 助手通过名称提及自动路由',
+                loopModeOff: '🟢 循环模式关闭',
+                autoLoop: '🤖 自动'
             };
         }
         applyI18n();
@@ -118,6 +152,17 @@
     // State
     let isSending = false;     // chat.send RPC 正在发送
     let planMode = false;
+
+    // Group chat state
+    let groupMode = false;
+    let groupAgents = [];        // Array of { agentId, name, avatar, color }
+    let groupWaitingIds = new Set(); // agentIds currently generating reply
+    let groupQueuedIds = [];         // agentIds queued in chain (ordered, not yet started)
+    let loopModeEnabled = false; // Loop Mode state (auto-route via plain-text name mentions)
+    let respondedAgentHistory = []; // ordered stack of agentIds that have replied (newest first), for auto-@mention fallback
+    let mentionPickerIndex = 0;  // selected index in mention picker
+    let mentionJustSelected = false; // หลังเลือกจาก picker แล้ว กด Enter จะส่งเลย
+    let renderedGroupMessages = new Map(); // agentId → Set of content hashes (for dedup)
     let attachments = []; // { type: 'file'|'image'|'reference', name, path?, data? }
     let messageQueue = []; // 消息队列: { id, text, attachments, createdAt }
     let queueIdCounter = 0; // 队列 ID 计数器
@@ -136,6 +181,31 @@
     let currentThinkLevel = 'minimal'; // 当前思考深度（会话级状态）
     let assistantName = '';   // AI 名称（从 agent.identity.get 获取）
     let assistantAvatar = ''; // AI 头像（emoji/字母/URL）
+
+    /**
+     * Lighten a hex color for better readability on dark backgrounds.
+     * Blends the color towards white by the given amount (0–1).
+     */
+    function lightenColor(hex, amount) {
+        const num = parseInt(hex.replace('#', ''), 16);
+        const r = Math.min(255, Math.round(((num >> 16) & 0xff) + (255 - ((num >> 16) & 0xff)) * amount));
+        const g = Math.min(255, Math.round(((num >> 8) & 0xff) + (255 - ((num >> 8) & 0xff)) * amount));
+        const b = Math.min(255, Math.round((num & 0xff) + (255 - (num & 0xff)) * amount));
+        return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+    }
+
+    /**
+     * Returns the most-recent agent that is still a member of the current group.
+     * Falls back through respondedAgentHistory until an active member is found.
+     * Returns null if no active agent has responded yet.
+     */
+    function getLastActiveAgent() {
+        for (const agentId of respondedAgentHistory) {
+            const agent = groupAgents.find(a => a.agentId === agentId);
+            if (agent) { return agent; }
+        }
+        return null;
+    }
 
     // xhigh 支持的模型列表
     const XHIGH_MODELS = [
@@ -189,6 +259,14 @@
     const statusPopupHeader = document.getElementById('statusPopupHeader');
     const statusPopupDesc = document.getElementById('statusPopupDesc');
     const statusPopupActions = document.getElementById('statusPopupActions');
+
+    // Group chat DOM
+    const groupMemberBar = document.getElementById('groupMemberBar');
+    const groupMembersEl = document.getElementById('groupMembers');
+    const groupToggleBtn = document.getElementById('groupToggleBtn');
+    const loopModeBtn = document.getElementById('loopModeBtn');
+    const mentionPickerEl = document.getElementById('mentionPicker');
+    const mentionPickerList = document.getElementById('mentionPickerList');
 
     // Escape HTML for XSS prevention (text nodes)
     function escapeHtml(text) {
@@ -422,6 +500,28 @@
         // 记录添加前是否在底部
         const wasAtBottom = isScrolledToBottom();
 
+        // Deduplicate: skip if last message is identical
+        // (prevents double-render from loadHistory + sendMessageNow flow)
+        const lastMsgEl = messages.lastElementChild;
+        if (lastMsgEl && lastMsgEl.className.includes(`message ${role}`)) {
+            let lastContent = '';
+            if (role === 'assistant') {
+                // Extract text content only (skip avatar/thinking)
+                const contentDiv = lastMsgEl.querySelector('.message-text') || lastMsgEl;
+                lastContent = (contentDiv.textContent || '').trim();
+            } else if (role === 'user') {
+                const textDiv = lastMsgEl.querySelector('.message-text');
+                lastContent = (textDiv?.textContent || lastMsgEl.textContent || '').trim();
+            } else {
+                lastContent = (lastMsgEl.textContent || '').trim();
+            }
+            const newContent = (content || '').trim();
+            if (lastContent && newContent && lastContent === newContent) {
+                console.log(`[Deduplicate] Skipping duplicate ${role} message`);
+                return; // Skip rendering duplicate
+            }
+        }
+
         const div = document.createElement('div');
         div.className = `message ${role}`;
 
@@ -508,6 +608,626 @@
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    //  GROUP CHAT
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Render a group agent message bubble.
+     * User messages are already shown by sendMessageNow — skip them here.
+     */
+    function renderGroupMessage(msg) {
+        console.log(`[Group] renderGroupMessage called with:`, msg);
+        
+        if (!msg || msg.role === 'user') {
+            console.log(`[Group] Skipping user message or null`);
+            // User messages already rendered in sendMessageNow — do not duplicate
+            return;
+        }
+
+        // Empty content = error/aborted, remove thinking indicator for that agent
+        if (!msg.content && (!msg.toolCalls || msg.toolCalls.length === 0)) {
+            console.log(`[Group] Empty content and no toolCalls for agent ${msg.agentId}, removing thinking indicator`);
+            removeAgentThinking(msg.agentId);
+            return;
+        }
+
+        // Deduplicate: skip if this exact message was already rendered
+        const contentHash = `${(msg.content || '').substring(0, 100)}:${(msg.toolCalls || []).length}`;
+        if (!renderedGroupMessages.has(msg.agentId)) {
+            renderedGroupMessages.set(msg.agentId, new Set());
+        }
+        const agentHashes = renderedGroupMessages.get(msg.agentId);
+        if (agentHashes.has(contentHash)) {
+            console.log(`[Group] Skipping duplicate message from ${msg.agentId}`);
+            removeAgentThinking(msg.agentId);
+            return;
+        }
+        agentHashes.add(contentHash);
+        console.log(`[Group] Rendering message from ${msg.agentId}:`, msg.content?.substring(0, 100) || '(no text, tools only)');
+
+        removeAgentThinking(msg.agentId);
+
+        const wasAtBottom = isScrolledToBottom();
+        const div = document.createElement('div');
+        div.className = 'message group-agent';
+        div.dataset.agentId = msg.agentId || '';
+
+        const initial = (msg.agentName || msg.agentId || '?').charAt(0).toUpperCase();
+        const color = escapeHtml(msg.agentColor || '#888');
+        const name = escapeHtml(msg.agentName || msg.agentId || 'Agent');
+
+        let html = '';
+        if (msg.parentMessageId) {
+            html += `<div class="group-delegation-indicator">↳ ${i18n.delegation || 'delegation'}</div>`;
+        }
+        html += `<div class="group-agent-header">`;
+        html += `<div class="group-agent-avatar" style="background:${color}">${escapeHtml(initial)}</div>`;
+        html += `<span class="group-agent-name" style="color:${color}">${name}</span>`;
+        html += `</div>`;
+        
+        // Render tool calls first (if any) — reuse renderToolCard() for consistent display
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+            html += '<div class="tool-cards-row">';
+            for (const tc of msg.toolCalls) {
+                html += renderToolCard(tc.name, tc.args);
+            }
+            html += '</div>';
+        }
+
+        // Render content text (if any)
+        if (msg.content) {
+            html += renderMarkdown(msg.content);
+        }
+
+        div.innerHTML = html;
+        messages.appendChild(div);
+
+        if (wasAtBottom) { scrollToBottom(); }
+    }
+
+    /**
+     * Show a per-agent thinking indicator.
+     */
+    function showAgentThinking(agentId) {
+        const agent = groupAgents.find(a => a.agentId === agentId);
+        if (!agent) { return; }
+
+        const existingId = `agent-thinking-${agentId}`;
+        if (document.getElementById(existingId)) { return; }
+
+        const wasAtBottom = isScrolledToBottom();
+        const div = document.createElement('div');
+        div.className = 'agent-thinking';
+        div.id = existingId;
+
+        const initial = (agent.name || agentId).charAt(0).toUpperCase();
+        const color = escapeHtml(agent.color || '#888');
+        const name = escapeHtml(agent.name || agentId);
+
+        div.innerHTML = `
+            <div class="agent-thinking-avatar" style="background:${color}">${escapeHtml(initial)}</div>
+            <span style="color:${color}">${name}</span>
+            <div class="thinking-dots"><span></span><span></span><span></span></div>
+        `;
+        messages.appendChild(div);
+        if (wasAtBottom) { scrollToBottom(); }
+    }
+
+    /**
+     * Remove per-agent thinking indicator.
+     */
+    function removeAgentThinking(agentId) {
+        const el = document.getElementById(`agent-thinking-${agentId}`);
+        if (el) { el.remove(); }
+    }
+
+    /**
+     * Show per-agent queued indicator (waiting in chain).
+     */
+    function showAgentQueued(agentId) {
+        const agent = groupAgents.find(a => a.agentId === agentId);
+        if (!agent) { return; }
+
+        const existingId = `agent-queued-${agentId}`;
+        if (document.getElementById(existingId)) { return; }
+
+        const wasAtBottom = isScrolledToBottom();
+        const div = document.createElement('div');
+        div.className = 'agent-queued';
+        div.id = existingId;
+
+        const initial = (agent.name || agentId).charAt(0).toUpperCase();
+        const color = escapeHtml(agent.color || '#888');
+        const name = escapeHtml(agent.name || agentId);
+
+        div.innerHTML = `
+            <div class="agent-queued-avatar" style="background:${color}; opacity: 0.5;">${escapeHtml(initial)}</div>
+            <span style="color:${color}; opacity: 0.6;">${name}</span>
+            <span style="opacity: 0.5; font-size: 0.85em; margin-left: 4px;">⏳ queued</span>
+        `;
+        messages.appendChild(div);
+        if (wasAtBottom) { scrollToBottom(); }
+    }
+
+    /**
+     * Remove per-agent queued indicator.
+     */
+    function removeAgentQueued(agentId) {
+        const el = document.getElementById(`agent-queued-${agentId}`);
+        if (el) { el.remove(); }
+    }
+
+    /**
+     * Show a transient warning toast in the chat area.
+     */
+    function showGroupWarningToast(text) {
+        const existing = document.getElementById('groupWarningToast');
+        if (existing) { existing.remove(); }
+
+        const toast = document.createElement('div');
+        toast.id = 'groupWarningToast';
+        toast.className = 'group-warning-toast';
+        toast.textContent = text;
+        messages.appendChild(toast);
+        scrollToBottom();
+
+        // Auto-dismiss after 8 seconds
+        setTimeout(() => { toast.remove(); }, 8000);
+    }
+
+    /**
+     * Update the group member bar based on current agent list.
+     */
+    function updateGroupMemberBar(agents) {
+        groupAgents = agents || [];
+        groupMode = groupAgents.length > 0;
+
+        if (!groupMode) {
+            groupMemberBar.style.display = 'none';
+            messageInput.placeholder = i18n.sendPlaceholder || 'Ask a question...';
+            respondedAgentHistory = []; // reset when leaving group
+            renderedGroupMessages.clear(); // clear dedup cache
+            modelDropdown.style.display = '';  // show model dropdown in normal mode
+            refreshBtn.style.display = '';     // show refresh button in normal mode
+            updateGroupToggleBtn();
+            return;
+        }
+
+        // Hide main model dropdown and refresh button in group mode
+        modelDropdown.style.display = 'none';
+        refreshBtn.style.display = 'none';
+        groupMemberBar.style.display = 'flex';
+        groupMembersEl.innerHTML = '';
+
+        for (const agent of groupAgents) {
+            const badge = document.createElement('div');
+            badge.className = 'group-member-badge';
+            badge.title = `${agent.name || agent.agentId} — right-click for options`;
+            badge.dataset.agentId = agent.agentId;
+
+            const color = agent.color || '#888';
+            const colorEscaped = escapeHtml(color);
+            const colorLightened = lightenColor(color, 0.35); // Brighten for better readability on dark bg
+            const name = escapeHtml(agent.name || agent.agentId);
+
+            badge.innerHTML = `
+                <span class="group-member-dot" style="background:${colorEscaped}"></span>
+                <span class="group-member-name" style="color:${escapeHtml(colorLightened)}">${name}</span>
+                <span class="group-member-remove" data-agent-id="${escapeAttr(agent.agentId)}" title="Remove">×</span>
+            `;
+            groupMembersEl.appendChild(badge);
+        }
+
+        // update input placeholder hint
+        messageInput.placeholder = i18n.groupModeHint || 'Use @name to mention a specific agent...';
+
+        // Show/hide Loop Mode button: only when > 1 agent in group
+        if (loopModeBtn) {
+            loopModeBtn.style.display = groupAgents.length > 1 ? 'inline-flex' : 'none';
+            updateLoopModeBtn();
+        }
+
+        updateGroupToggleBtn();
+    }
+
+    // ── Loop Mode Button ──────────────────────────────────────────────────────
+
+    function updateLoopModeBtn() {
+        if (!loopModeBtn) { return; }
+        if (loopModeEnabled) {
+            loopModeBtn.classList.add('active');
+            loopModeBtn.title = i18n.loopModeOn || '🔴 Loop Mode ON — agents auto-route via name mentions';
+        } else {
+            loopModeBtn.classList.remove('active');
+            loopModeBtn.title = i18n.loopModeOff || '🟢 Loop Mode OFF';
+        }
+    }
+
+    if (loopModeBtn) {
+        loopModeBtn.addEventListener('click', () => {
+            vscode.postMessage({ type: 'toggleLoopMode' });
+        });
+    }
+
+    /** Shorten model name: strip provider prefix, keep last segment */
+    function shortModelName(model) {
+        if (!model || model === 'default') { return 'default'; }
+        const parts = model.split('/');
+        return parts[parts.length - 1];
+    }
+
+    // Click on remove × in member badge
+    groupMembersEl.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('.group-member-remove');
+        if (!removeBtn) { return; }
+        const agentId = removeBtn.dataset.agentId;
+        if (agentId) {
+            vscode.postMessage({ type: 'removeAgentFromGroup', agentId });
+        }
+    });
+
+    // ── Agent Badge Context Menu ──────────────────────────────────────────────
+
+    let agentContextMenu = null; // currently open context menu element
+
+    function closeAgentContextMenu() {
+        if (agentContextMenu) {
+            agentContextMenu.remove();
+            agentContextMenu = null;
+        }
+        // Also remove any open model sub-menu (it's a separate body element)
+        const subMenu = document.querySelector('.agent-model-submenu');
+        if (subMenu) { subMenu.remove(); }
+    }
+
+    groupMembersEl.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const badge = e.target.closest('.group-member-badge');
+        if (!badge) { return; }
+        const agentId = badge.dataset.agentId;
+        if (!agentId) { return; }
+
+        closeAgentContextMenu();
+        openAgentContextMenu(agentId, badge);
+    });
+
+    // Close context menu on outside click
+    document.addEventListener('click', (e) => {
+        if (agentContextMenu && !agentContextMenu.contains(e.target)) {
+            closeAgentContextMenu();
+        }
+    });
+
+    function openAgentContextMenu(agentId, badgeEl) {
+        const agent = groupAgents.find(a => a.agentId === agentId);
+        if (!agent) { return; }
+
+        const menu = document.createElement('div');
+        menu.className = 'agent-context-menu';
+
+        // "Set Model" item with sub-menu trigger
+        const setModelItem = document.createElement('div');
+        setModelItem.className = 'agent-ctx-item';
+        setModelItem.innerHTML = `<span>⚡ ${escapeHtml(i18n['ctx.setModel'] || 'Set Model')}</span><span class="agent-ctx-arrow">▶</span>`;
+        setModelItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openModelSubMenu(agentId, agent.modelOverride, setModelItem);
+        });
+        menu.appendChild(setModelItem);
+
+        // Separator
+        const sep = document.createElement('div');
+        sep.className = 'agent-ctx-sep';
+        menu.appendChild(sep);
+
+        // "Remove" item
+        const removeItem = document.createElement('div');
+        removeItem.className = 'agent-ctx-item agent-ctx-danger';
+        removeItem.textContent = `✕ ${i18n['ctx.remove'] || 'Remove from group'}`;
+        removeItem.addEventListener('click', () => {
+            vscode.postMessage({ type: 'removeAgentFromGroup', agentId });
+            closeAgentContextMenu();
+        });
+        menu.appendChild(removeItem);
+
+        // Position below badge (with bounds checking)
+        document.body.appendChild(menu);
+        const rect = badgeEl.getBoundingClientRect();
+        const padding = 4;
+
+        // Initial position: below badge
+        let left = rect.left;
+        let top = rect.bottom + padding;
+
+        // Ensure menu doesn't go off-screen horizontally (right edge)
+        requestAnimationFrame(() => {
+            const menuRect = menu.getBoundingClientRect();
+            if (menuRect.right > window.innerWidth) {
+                left = Math.max(0, window.innerWidth - menuRect.width - padding);
+            }
+            // Ensure menu doesn't go off-screen vertically (bottom edge)
+            if (menuRect.bottom > window.innerHeight) {
+                top = Math.max(0, rect.top - menuRect.height - padding);
+            }
+            menu.style.left = left + 'px';
+            menu.style.top = top + 'px';
+        });
+
+        agentContextMenu = menu;
+    }
+
+    function openModelSubMenu(agentId, currentModel, parentItem) {
+        // Remove existing sub-menu
+        const existing = document.querySelector('.agent-model-submenu');
+        if (existing) { existing.remove(); }
+
+        // Build model list: "Default" + available models from current modelOptions
+        const modelItems = [];
+        // Collect from existing model dropdown options
+        const optEls = modelOptionsEl.querySelectorAll('.dropdown-option');
+        optEls.forEach(el => {
+            const val = el.dataset.value;
+            if (val) { modelItems.push(val); }
+        });
+
+        const sub = document.createElement('div');
+        sub.className = 'agent-context-menu agent-model-submenu';
+
+        // "Use Default" option first
+        const defaultItem = document.createElement('div');
+        defaultItem.className = 'agent-ctx-item' + (!currentModel ? ' agent-ctx-active' : '');
+        defaultItem.textContent = `○ ${i18n['ctx.modelDefault'] || 'Use Agent Default'}`;
+        defaultItem.addEventListener('click', () => {
+            vscode.postMessage({ type: 'setAgentModel', agentId, model: null });
+            closeAgentContextMenu();
+        });
+        sub.appendChild(defaultItem);
+
+        // Separator
+        if (modelItems.length > 0) {
+            const sep = document.createElement('div');
+            sep.className = 'agent-ctx-sep';
+            sub.appendChild(sep);
+        }
+
+        for (const model of modelItems) {
+            const item = document.createElement('div');
+            item.className = 'agent-ctx-item' + (currentModel === model ? ' agent-ctx-active' : '');
+            item.textContent = `${currentModel === model ? '●' : '○'} ${shortModelName(model)}`;
+            item.title = model;
+            item.addEventListener('click', () => {
+                vscode.postMessage({ type: 'setAgentModel', agentId, model });
+                closeAgentContextMenu();
+            });
+            sub.appendChild(item);
+        }
+
+        document.body.appendChild(sub);
+
+        // Position submenu (try right first, then left if no space)
+        const parentRect = parentItem.getBoundingClientRect();
+        const padding = 4;
+        const tryRight = parentRect.right + padding;
+
+        // Initial position: to the right of parent item, aligned top
+        let subLeft = tryRight;
+        let subTop = parentRect.top;
+
+        // Ensure sub-menu doesn't go off-screen
+        requestAnimationFrame(() => {
+            const subRect = sub.getBoundingClientRect();
+
+            // Check right edge: if it goes off-screen, try left side
+            if (subRect.right > window.innerWidth) {
+                subLeft = Math.max(0, parentRect.left - subRect.width - padding);
+            }
+
+            // Check bottom edge: shift up if necessary
+            if (subRect.bottom > window.innerHeight) {
+                subTop = Math.max(0, window.innerHeight - subRect.height - padding);
+            }
+
+            // Check top edge: shift down if necessary
+            if (subTop < 0) {
+                subTop = padding;
+            }
+
+            sub.style.left = subLeft + 'px';
+            sub.style.top = subTop + 'px';
+        });
+    }
+
+    // Group toggle button in header — always means "add agent to group"
+    function updateGroupToggleBtn() {
+        if (!groupToggleBtn) return;
+        const use = groupToggleBtn.querySelector('use');
+        use.setAttribute('href', '#icon-group-add');
+        groupToggleBtn.title = i18n.groupToggle || 'Add agent to group';
+        // Visual active state when group is active (informational only)
+        groupToggleBtn.classList.toggle('active', groupMode);
+    }
+
+    if (groupToggleBtn) {
+        groupToggleBtn.addEventListener('click', () => {
+            vscode.postMessage({ type: 'addAgentToGroup' });
+        });
+    }
+
+    // ── @ Mention Autocomplete ────────────────────────────────────────────────
+
+    function getMentionQueryFromInput() {
+        const text = messageInput.value;
+        const pos = messageInput.selectionStart || 0;
+        const before = text.substring(0, pos);
+        const atIdx = before.lastIndexOf('@');
+        if (atIdx === -1) { return null; }
+        const query = before.substring(atIdx + 1);
+        if (/\s/.test(query)) { return null; }
+        return { query, atIdx };
+    }
+
+    function showMentionPicker(query) {
+        if (!groupMode || groupAgents.length === 0) {
+            hideMentionPicker();
+            return;
+        }
+
+        const filtered = groupAgents.filter(a => {
+            const name = (a.name || a.agentId).toLowerCase();
+            return name.startsWith(query.toLowerCase());
+        });
+
+        if (filtered.length === 0) {
+            hideMentionPicker();
+            return;
+        }
+
+        mentionPickerIndex = 0;
+        mentionPickerList.innerHTML = '';
+
+        filtered.forEach((agent, idx) => {
+            const item = document.createElement('div');
+            item.className = 'mention-picker-item' + (idx === 0 ? ' active' : '');
+            item.dataset.agentId = agent.agentId;
+            item.dataset.agentName = agent.name || agent.agentId;
+
+            const color = escapeHtml(agent.color || '#888');
+            const name = escapeHtml(agent.name || agent.agentId);
+            const id = escapeHtml(agent.agentId);
+
+            item.innerHTML = `
+                <span class="mention-picker-dot" style="background:${color}"></span>
+                <span class="mention-picker-name">${name}</span>
+                ${name !== id ? `<span class="mention-picker-id">(${id})</span>` : ''}
+            `;
+
+            item.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                insertMentionFromPicker(agent.name || agent.agentId);
+            });
+
+            mentionPickerList.appendChild(item);
+        });
+
+        mentionPickerEl.style.display = 'block';
+        updateSendButtonState(); // ปิดปุ่มส่งเมื่อ picker เปิด
+    }
+
+    function hideMentionPicker() {
+        mentionPickerEl.style.display = 'none';
+        mentionPickerList.innerHTML = '';
+        mentionPickerIndex = 0;
+        updateSendButtonState(); // เปิดปุ่มส่งเมื่อ picker ปิด
+    }
+
+    function insertMentionFromPicker(agentName) {
+        const text = messageInput.value;
+        const pos = messageInput.selectionStart || 0;
+        const before = text.substring(0, pos);
+        const after = text.substring(pos);
+        const atIdx = before.lastIndexOf('@');
+        if (atIdx === -1) { hideMentionPicker(); return; }
+
+        const prefix = before.substring(0, atIdx);
+        const inserted = `@${agentName} `;
+        messageInput.value = prefix + inserted + after;
+        const newPos = atIdx + inserted.length;
+        messageInput.setSelectionRange(newPos, newPos);
+        hideMentionPicker();
+        mentionJustSelected = true; // ทำเครื่องหมายว่าเพิ่งเลือกแล้ว
+        messageInput.focus();
+        autoResize();
+    }
+
+    // Update mention picker on input
+    messageInput.addEventListener('input', () => {
+        autoResize();
+        mentionJustSelected = false; // reset เมื่อพิมพ์ใหม่
+        
+        // บังคับใช้ dropdown: ถ้ามี @ ที่พิมพ์เอง (ไม่ได้มาจากการเลือก) → ลบออก
+        const text = messageInput.value;
+        const pos = messageInput.selectionStart || 0;
+        const before = text.substring(0, pos);
+        
+        // ตรวจสอบว่ามี @ ที่ cursor หรือไม่
+        const atIdx = before.lastIndexOf('@');
+        if (atIdx !== -1 && !before.substring(atIdx).includes(' ')) {
+            // ตรวจว่า @ นี้มาจากไหน - ถ้าเป็นการพิมพ์เอง (ไม่มี mentionJustSelected) 
+            // ให้ลบ @ ออกและแสดง picker ให้เลือก
+        }
+        
+        const result = getMentionQueryFromInput();
+        if (result !== null && groupMode) {
+            // ถ้ามี @ ให้แสดง picker (ถ้า picker ซ่อนอยู่แสดงว่าพิมพ์เอง → block การพิมพ์)
+            showMentionPicker(result.query);
+        } else {
+            hideMentionPicker();
+        }
+    });
+
+    // Navigate picker with keyboard
+    messageInput.addEventListener('keydown', (e) => {
+        // ถ้า picker ปิด และไม่ได้เพิ่งเลือก → ไม่ต้องทำอะไร
+        if (mentionPickerEl.style.display === 'none' && !mentionJustSelected) { return; }
+
+        const items = mentionPickerList.querySelectorAll('.mention-picker-item');
+
+        // ถ้า picker เปิดอยู่ → block Enter ทั้งหมด (บังคับให้คลิกหรือกด space)
+        if (mentionPickerEl.style.display !== 'none') {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                return; // ไม่ให้ส่งข้อความ
+            }
+            
+            // Space = เลือก agent ปัจจุบัน
+            if (e.key === ' ' && items.length > 0) {
+                e.preventDefault();
+                const active = items[mentionPickerIndex];
+                if (active) {
+                    insertMentionFromPicker(active.dataset.agentName || active.dataset.agentId || '');
+                }
+                return;
+            }
+        }
+
+        // ถ้าเพิ่งเลือก agent แล้ว และกด Enter อีกครั้ง → ส่งข้อความ
+        if (mentionJustSelected && e.key === 'Enter') {
+            mentionJustSelected = false;
+            return; // ให้ไปที่ keydown handler หลักเพื่อส่งข้อความ
+        }
+
+        if (e.key === 'Tab') {
+            // Tab = เลือก agent
+            const active = items[mentionPickerIndex];
+            if (active) {
+                e.preventDefault();
+                insertMentionFromPicker(active.dataset.agentName || active.dataset.agentId || '');
+            }
+            return;
+        }
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            mentionPickerIndex = (mentionPickerIndex + 1) % items.length;
+            items.forEach((el, i) => el.classList.toggle('active', i === mentionPickerIndex));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            mentionPickerIndex = (mentionPickerIndex - 1 + items.length) % items.length;
+            items.forEach((el, i) => el.classList.toggle('active', i === mentionPickerIndex));
+        } else if (e.key === 'Enter' || e.key === 'Tab') {
+            const active = items[mentionPickerIndex];
+            if (active) {
+                e.preventDefault();
+                insertMentionFromPicker(active.dataset.agentName || active.dataset.agentId || '');
+            }
+        } else if (e.key === 'Escape') {
+            hideMentionPicker();
+        }
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════
+
     // Update send button state
     /**
      * Whether the chat is busy (sending or waiting for AI reply)
@@ -518,6 +1238,7 @@
 
     function updateSendButtonState() {
         const hasInput = messageInput.value.trim().length > 0 || attachments.length > 0;
+        const pickerOpen = mentionPickerEl.style.display !== 'none'; // ปิดปุ่มส่งเมื่อ picker เปิด
 
         if (isBusy()) {
             sendBtn.classList.remove('active');
@@ -525,8 +1246,9 @@
             sendBtn.title = i18n.stop;
         } else {
             sendBtn.classList.remove('sending');
-            sendBtn.classList.toggle('active', hasInput);
-            sendBtn.title = i18n.send;
+            // ปิดปุ่มส่งเมื่อ picker เปิด หรือ ไม่มีข้อความ
+            sendBtn.classList.toggle('active', hasInput && !pickerOpen);
+            sendBtn.title = pickerOpen ? i18n.selectAgent : i18n.send;
         }
     }
 
@@ -1017,7 +1739,7 @@ Install it with:
 npm install -g openclaw
 
 Or configure the openclaw path in VSCode settings:
-Settings → OpenClaw → Openclaw Path`
+Settings → OpenClaw → OpenClaw Path`
             };
         }
 
@@ -1148,6 +1870,108 @@ Try:
             }
         }
 
+        // ── Group mode: validate @mention BEFORE showing message ────────────
+        if (groupMode && groupAgents.length > 0) {
+            // Deduplicate @mentions: remove duplicate @AgentName occurrences (keep first)
+            const seenMentions = new Set();
+            for (const agent of groupAgents) {
+                const mentionName = '@' + (agent.name || agent.agentId);
+                // Match all occurrences, keep the first, remove subsequent duplicates
+                let firstFound = false;
+                const mentionRegex = new RegExp(
+                    mentionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                    'gi'
+                );
+                fullMessage = fullMessage.replace(mentionRegex, (match) => {
+                    if (!firstFound) {
+                        firstFound = true;
+                        return match; // keep first occurrence
+                    }
+                    return ''; // remove duplicate
+                });
+                // Also update display text
+                let firstFoundText = false;
+                text = text.replace(mentionRegex, (match) => {
+                    if (!firstFoundText) {
+                        firstFoundText = true;
+                        return match;
+                    }
+                    return '';
+                });
+            }
+            // Clean up any double spaces from removal
+            fullMessage = fullMessage.replace(/  +/g, ' ').trim();
+            text = text.replace(/  +/g, ' ').trim();
+
+            const hasMention = groupAgents.some(a =>
+                fullMessage.includes('@' + (a.name || a.agentId))
+            );
+
+            // Auto-prepend @lastAgent for confirm/execute commands in plan mode.
+            // Uses getLastActiveAgent() so if the last responder left the group,
+            // it automatically falls back to the next most-recent active member.
+            if (!hasMention && planMode) {
+                const confirmCommands = ['execute', 'go', 'yes', 'ok', 'y', 'run',
+                    'ดำเนินการ', 'ยืนยัน', 'เริ่ม', '执行', '继续', '确认', '开始'];
+                const trimmedInput = text.trim().toLowerCase();
+                const isConfirm = confirmCommands.some(cmd => trimmedInput === cmd);
+                if (isConfirm) {
+                    const lastAgent = getLastActiveAgent();
+                    if (lastAgent) {
+                        const mention = '@' + (lastAgent.name || lastAgent.agentId);
+                        fullMessage = mention + ' ' + fullMessage;
+                        // Update display text too
+                        text = mention + ' ' + text;
+                    }
+                }
+            }
+
+            const hasMentionFinal = groupAgents.some(a =>
+                fullMessage.includes('@' + (a.name || a.agentId))
+            );
+            if (!hasMentionFinal) {
+                showGroupWarningToast(i18n.groupMentionRequired ||
+                    '⚠️ Please @mention at least one agent (e.g. @AgentName your request).');
+                // Do NOT clear the input — let user add a mention and retry
+                return;
+            }
+
+            // Valid mention — show user message then send
+            addMessage('user', text || '[attachment]', atts.length > 0 ? [...atts] : null);
+
+            if (atts === attachments) {
+                messageInput.value = '';
+                messageInput.style.height = 'auto';
+                attachments = [];
+                updateAttachments();
+            }
+            hideMentionPicker();
+
+            isSending = true;
+            updateSendButtonState();
+
+            // Show thinking indicator immediately for mentioned agents (don't wait for round-trip)
+            {
+                const mentionedAgents = groupAgents.filter(a =>
+                    fullMessage.includes('@' + (a.name || a.agentId)) ||
+                    fullMessage.includes('@' + a.agentId)
+                );
+                if (mentionedAgents.length > 0) {
+                    // First agent → thinking dots, rest → queued
+                    showAgentThinking(mentionedAgents[0].agentId);
+                    groupWaitingIds = new Set(mentionedAgents.map(a => a.agentId));
+                    groupQueuedIds = mentionedAgents.slice(1).map(a => a.agentId);
+                    for (const qId of groupQueuedIds) {
+                        showAgentQueued(qId);
+                    }
+                }
+            }
+
+            vscode.postMessage({ type: 'sendGroupMessage', content: fullMessage, planMode: planMode });
+            return;
+        }
+
+        // ── Normal single-agent mode ──────────────────────────────────────────
         // Show user message with attachments
         addMessage('user', text || '[attachment]', atts.length > 0 ? [...atts] : null);
 
@@ -1158,8 +1982,8 @@ Try:
             attachments = [];
             updateAttachments();
         }
+        hideMentionPicker();
 
-        // Send
         isSending = true;
         updateSendButtonState();
         showThinking();
@@ -1498,10 +2322,30 @@ Try:
 
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
-            // 输入法正在组字时（如中文拼音），不响应回车
-            if (e.isComposing || e.keyCode === 229) {
+            // ลด IME check: เฉพาะ isComposing=true จริง ๆ (keyCode 229 ถูกลบออก เพราะอาจ block Thai input)
+            if (e.isComposing) {
                 return;
             }
+
+            // ถ้า dropdown/picker เปิดอยู่ ให้ปิดก่อนแล้วไม่ส่งข้อความ
+            if (openDropdownId) {
+                e.preventDefault();
+                closeAllDropdowns();
+                return;
+            }
+            // ถ้า mention picker เปิดอยู่ → block Enter ไม่ให้ส่ง (บังคับเลือกจาก dropdown)
+            if (mentionPickerEl.style.display !== 'none') {
+                e.preventDefault();
+                // ไม่ hide picker เพื่อให้ user ยังเห็นและเลือกได้
+                return;
+            }
+            // ถ้า slash picker เปิดอยู่ ให้ปิดก่อนแล้วไม่ส่ง
+            if (slashPickerOverlay.classList.contains('show')) {
+                e.preventDefault();
+                hideSlashPicker();
+                return;
+            }
+
             e.preventDefault();
 
             const text = messageInput.value.trim();
@@ -1510,7 +2354,14 @@ Try:
             if (!text && attachments.length === 0) {
                 // Plan mode: ถ้ามีประวัติข้อความแล้ว กด enter = ส่ง "execute"
                 if (planMode && messages && messages.children && messages.children.length > 0) {
-                    messageInput.value = 'execute';
+                    // Group mode: auto-tag last active responding agent (with fallback)
+                    if (groupMode) {
+                        const lastAgent = getLastActiveAgent();
+                        const mention = lastAgent ? '@' + (lastAgent.name || lastAgent.agentId) : null;
+                        messageInput.value = mention ? mention + ' execute' : 'execute';
+                    } else {
+                        messageInput.value = 'execute';
+                    }
                     sendMessage();
                     return;
                 }
@@ -1861,8 +2712,9 @@ Try:
             case 'loadHistory':
                 if (message.messages && message.messages.length > 0) {
                     // 计算内容指纹，跳过无变化的重建（避免自动刷新闪烁）
+                    // Use content substring (first 100 chars) for more reliable change detection
                     const hash = message.messages.map(m =>
-                        `${m.role}:${(m.content || '').length}:${(m.toolCalls || []).length}:${(m.thinking || '').length}`
+                        `${m.role}:${(m.content || '').substring(0, 100)}:${(m.toolCalls || []).length}:${(m.thinking || '').length}`
                     ).join('|');
                     if (hash === lastHistoryHash) {
                         // 内容没变，跳过重建
@@ -1983,6 +2835,123 @@ Try:
                 isRefreshing = false;
                 setRefreshButtonState(false);
                 updateRefreshButtonDisabled();
+                break;
+
+            // ── Group Chat Messages ───────────────────────────────────────────
+            case 'groupMessage':
+                renderGroupMessage(message);
+                // Track reply completion for any agent message (including empty/error cases).
+                // Always delete the agentId so the waiting set doesn't get stuck.
+                if (message.role === 'agent') {
+                    // Track last responding agent for auto-@mention on plan-mode execute.
+                    // Push to front of history (newest first); avoid duplicates.
+                    if (message.content && message.agentId) {
+                        respondedAgentHistory = [
+                            message.agentId,
+                            ...respondedAgentHistory.filter(id => id !== message.agentId)
+                        ].slice(0, 20); // cap at 20 entries
+                    }
+                    groupWaitingIds.delete(message.agentId);
+                    if (groupWaitingIds.size === 0) {
+                        isSending = false;
+                        updateSendButtonState();
+                    }
+                }
+                break;
+
+            case 'groupStateUpdate':
+                updateGroupMemberBar(message.agents || []);
+                if (!groupMode) {
+                    // Restore normal placeholder
+                    messageInput.placeholder = i18n.sendPlaceholder || 'Ask a question...';
+                    isSending = false;
+                    updateSendButtonState();
+                    // Clear group dedup cache when leaving group mode
+                    renderedGroupMessages.clear();
+                }
+                break;
+
+            case 'waitingGroupReply':
+                // Chain mode: first agent = thinking, rest = queued status
+                {
+                    const agentIds = message.agentIds || [];
+                    groupWaitingIds = new Set(agentIds);
+                    if (agentIds.length > 0) {
+                        // First agent: active thinking indicator
+                        showAgentThinking(agentIds[0]);
+                        // Remaining agents: queued indicators (ordered)
+                        groupQueuedIds = agentIds.slice(1);
+                        for (const agentId of groupQueuedIds) {
+                            showAgentQueued(agentId);
+                        }
+                    }
+                }
+                isSending = true;
+                updateSendButtonState();
+                break;
+
+            case 'chainProgress':
+                // Chain advanced: new current agent + updated queue
+                {
+                    const { current, queued } = message;
+                    // Remove queued indicator for the agent that just became active
+                    removeAgentQueued(current);
+                    // Show thinking for the now-active agent
+                    showAgentThinking(current);
+                    // Update queued list (remove any that are no longer queued)
+                    const newQueuedSet = new Set(queued || []);
+                    for (const oldId of groupQueuedIds) {
+                        if (!newQueuedSet.has(oldId)) {
+                            removeAgentQueued(oldId);
+                        }
+                    }
+                    groupQueuedIds = queued || [];
+                }
+                break;
+
+            case 'groupLoopWarning':
+                // Clear all agent thinking + queued indicators
+                for (const agentId of groupWaitingIds) {
+                    removeAgentThinking(agentId);
+                }
+                for (const agentId of groupQueuedIds) {
+                    removeAgentQueued(agentId);
+                }
+                groupWaitingIds.clear();
+                groupQueuedIds = [];
+                isSending = false;
+                updateSendButtonState();
+                showGroupWarningToast(i18n.groupLoopWarning || '⚠️ Loop guard triggered.');
+                break;
+
+            case 'loopModeToggled':
+                loopModeEnabled = !!message.enabled;
+                updateLoopModeBtn();
+                break;
+
+            case 'autoLoopMessage':
+                // Auto-loop triggered — do NOT display user bubble (system already routing).
+                // Just update UI state for thinking indicators.
+                {
+                    const autoContent = message.content || '';
+                    if (autoContent) {
+                        // Show thinking indicator immediately for mentioned agents
+                        const mentionedAgents = groupAgents.filter(a =>
+                            autoContent.includes('@' + (a.name || a.agentId)) ||
+                            autoContent.includes('@' + a.agentId)
+                        );
+                        if (mentionedAgents.length > 0) {
+                            showAgentThinking(mentionedAgents[0].agentId);
+                            groupWaitingIds = new Set(mentionedAgents.map(a => a.agentId));
+                            groupQueuedIds = mentionedAgents.slice(1).map(a => a.agentId);
+                            for (const qId of groupQueuedIds) {
+                                showAgentQueued(qId);
+                            }
+                            isSending = true;
+                            updateSendButtonState();
+                        }
+                    }
+                }
                 break;
         }
     });

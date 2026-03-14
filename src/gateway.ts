@@ -42,7 +42,7 @@ export class GatewayClient {
     constructor(baseUrl: string, customPath?: string) {
         this._baseUrl = baseUrl;
         // 尝试常见的 openclaw 路径
-        this._openclawPath = this._findOpenclawPath(customPath);
+        this._openclawPath = this._findOpenClawPath(customPath);
         // 读取 Gateway auth token
         this._gatewayToken = this._readGatewayToken();
     }
@@ -107,7 +107,7 @@ export class GatewayClient {
         return vscode.workspace.getConfiguration('openclaw').get('enableCliFallback', false);
     }
 
-    private _findOpenclawPath(customPath?: string): string {
+    private _findOpenClawPath(customPath?: string): string {
         // 优先使用用户自定义路径
         if (customPath && fs.existsSync(customPath)) {
             return customPath;
@@ -275,7 +275,7 @@ export class GatewayClient {
         
         // CLI 模式：检查可用性
         try {
-            await this._checkOpenclawAvailable();
+            await this._checkOpenClawAvailable();
             this._connected = true;
             this._connectedUrl = this._baseUrl;
             this._lastError = '';
@@ -750,7 +750,7 @@ export class GatewayClient {
         });
     }
 
-    private async _checkOpenclawAvailable(): Promise<void> {
+    private async _checkOpenClawAvailable(): Promise<void> {
         return new Promise((resolve, reject) => {
             const spawnCmd = this._getSpawnCommand(['--version']);
             const proc = spawn(spawnCmd.cmd, spawnCmd.args, {
@@ -898,14 +898,15 @@ export class GatewayClient {
      * 设置会话模型（会话级覆盖）
      */
     public async setSessionModel(sessionKey: string, model: string): Promise<void> {
-        // 通过 chat.send 发送 /model 命令切换模型
+        // 通过 chat.send 发送 /model 命令切换模型 (fire-and-forget)
         // 注意：sessions.patch 只写 session store 的 modelOverride，
         // 但 dispatchInboundMessage 内部的 agent context 不会读取该 override，
-        // 必须通过 /model 命令走完整的模型切换流程
+        // 必须通过 /model 命令走完整的模型切换流程。
+        // 使用 fire-and-forget 避免 hang — /model 可能不返回 chat event
         if (this._mode === 'ws' && this._wsClient) {
             try {
                 const modelCmd = (!model || model === 'default') ? '/model default' : `/model ${model}`;
-                await this._wsClient.sendMessage(sessionKey, modelCmd);
+                this.sendMessageFireAndForget(sessionKey, modelCmd);
                 console.log(`OpenClaw: 会话 ${sessionKey} 模型已通过 /model 命令设置为 ${model || '默认'}`);
                 return;
             } catch (err) {
@@ -1090,10 +1091,12 @@ export class GatewayClient {
     /**
      * 获取 AI 身份信息（名称、头像）
      */
-    public async getAgentIdentity(): Promise<{ name: string; avatar: string } | null> {
+    public async getAgentIdentity(agentId?: string): Promise<{ name: string; avatar: string } | null> {
         if (this._mode === 'ws' && this._wsClient) {
             try {
-                const result = await this._wsClient.sendRpc('agent.identity.get', {});
+                const params: any = {};
+                if (agentId) { params.agentId = agentId; }
+                const result = await this._wsClient.sendRpc('agent.identity.get', params);
                 return {
                     name: result?.name || '',
                     avatar: result?.avatar || ''
@@ -1104,5 +1107,26 @@ export class GatewayClient {
             }
         }
         return null;
+    }
+
+    /**
+     * 获取 Agent 列表（从 Gateway RPC agents.list）
+     */
+    public async getAgentList(): Promise<Array<{ id: string; name?: string }>> {
+        if (this._mode === 'ws' && this._wsClient) {
+            try {
+                const result = await this._wsClient.sendRpc('agents.list', {});
+                if (Array.isArray(result?.agents)) {
+                    return result.agents.map((a: any) => ({
+                        id: String(a.id || '').trim(),
+                        name: typeof a.name === 'string' ? a.name.trim() : undefined
+                    })).filter((a: any) => a.id);
+                }
+            } catch (err) {
+                console.warn('[Gateway] 获取 Agent 列表失败:', err);
+            }
+        }
+        // Fallback: return just 'main'
+        return [{ id: 'main' }];
     }
 }

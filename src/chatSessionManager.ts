@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { getProjectConfig, ProjectConfig, ProjectSkill, ProjectWorkflow } from './projectScanner';
 import { getSkillMatcher } from './skillMatcher';
-import { getMessageBuilder } from './messageBuilder';
+import { getMessageBuilder, isSentinelMessage } from './messageBuilder';
 import { LanguageManager } from './languageManager';
 
 export interface ProjectStatusMessage {
@@ -318,7 +318,11 @@ export class ChatSessionManager {
     /**
      * 发送上下文设置（语言 + VSCode 工作区），fire-and-forget 不等回复
      */
-    async sendContextSetup(gateway: any, sessionKey: string): Promise<void> {
+    /**
+     * Build the context setup message (language + workspace) without sending.
+     * Returns empty string if nothing to send.
+     */
+    buildContextSetupMessage(): string {
         const parts: string[] = [];
 
         // 语言指令
@@ -351,10 +355,15 @@ export class ChatSessionManager {
             }
         }
 
-        if (parts.length === 0) return;
+        if (parts.length === 0) return '';
 
         const header = '[system-setup:no-reply]';
-        const setupMessage = `${header}\n\n${parts.join('\n\n')}`;
+        return `${header}\n\n${parts.join('\n\n')}`;
+    }
+
+    async sendContextSetup(gateway: any, sessionKey: string): Promise<void> {
+        const setupMessage = this.buildContextSetupMessage();
+        if (!setupMessage) return;
 
         try {
             // Fire-and-forget: 只发送不等回复，避免阻塞后续用户消息
@@ -459,6 +468,11 @@ export class ChatSessionManager {
                 skipNextAssistant = false;
                 // 过滤旧格式的独立确认回复
                 if (content.includes('Language settings updated')) {
+                    continue;
+                }
+
+                // Filter sentinel messages (NO_REPLY, HEARTBEAT_OK)
+                if (isSentinelMessage(content)) {
                     continue;
                 }
 
